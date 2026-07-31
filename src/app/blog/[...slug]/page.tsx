@@ -23,7 +23,8 @@ export async function generateStaticParams() {
   return allPosts
     .filter((post) => !post.draft)
     .map((post) => ({
-      slug: post._meta.path.replace(/\.mdx$/, ""),
+      // content/rust_learn/day-1.mdx → /blog/rust_learn/day-1/
+      slug: post._meta.path.replace(/\.mdx$/, "").split("/"),
     }));
 }
 
@@ -31,10 +32,11 @@ export async function generateMetadata({
   params,
 }: {
   params: Promise<{
-    slug: string;
+    slug: string[];
   }>;
 }): Promise<Metadata | undefined> {
-  const { slug } = await params;
+  const { slug: slugParts } = await params;
+  const slug = slugParts.join("/");
   const post = allPosts.find((p) => p._meta.path.replace(/\.mdx$/, "") === slug);
 
   if (!post) {
@@ -80,10 +82,11 @@ export default async function Blog({
   params,
 }: {
   params: Promise<{
-    slug: string;
+    slug: string[];
   }>;
 }) {
-  const { slug } = await params;
+  const { slug: slugParts } = await params;
+  const slug = slugParts.join("/");
   const sortedPosts = getSortedPosts();
   const currentIndex = sortedPosts.findIndex(
     (p) => p._meta.path.replace(/\.mdx$/, "") === slug
