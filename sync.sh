@@ -16,5 +16,5 @@ git commit -m "$msg"
 git push origin main
 
 echo ""
-echo "✅ 已推送。构建进度: https://github.com/RoddyH17/blog/actions"
-echo "🌐 博客地址: https://roddyh17.github.io/blog/"
+echo "✅ 已推送。构建进度: https://github.com/RoddyH17/RoddyH17.github.io/actions"
+echo "🌐 博客地址: https://roddyh17.github.io/"

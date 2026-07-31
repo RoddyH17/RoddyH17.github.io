@@ -9,13 +9,13 @@ import { NextjsIconDark } from "@/components/ui/svgs/nextjsIconDark";
 export const DATA = {
   name: "Roddy Huang",
   initials: "RH",
-  url: "https://roddyh17.github.io/blog",
+  url: "https://roddyh17.github.io",
   location: "Ithaca, NY",
   locationLink: "https://www.google.com/maps/place/ithaca",
   description:
     "Cornell math major learning Rust in public. Daily notes, code, and reflections from a C++ perspective.",
   summary:
-    "This is my Rust learning log — one day, one folder, one post. I come from a C++ / Python / quant background ([more about me](https://roddy95o.com)), and every post here reflects on what Rust does differently from C++: ownership vs manual memory management, cargo vs CMake, traits vs templates. All code lives in [RoddyH17/rust_learn](https://github.com/RoddyH17/rust_learn) — each `dayN/` folder is a runnable crate, each blog post is a plain MDX file anyone (including future me) can edit.",
+    "This is my learning log — one day, one folder, one post. The current series is Rust: I come from a C++ / Python / quant background, and every post reflects on what Rust does differently from C++: ownership vs manual memory management, cargo vs CMake, traits vs templates. All code lives in [RoddyH17/rust_learn](https://github.com/RoddyH17/rust_learn) — each `dayN/` folder is a runnable crate, each blog post is a plain MDX file anyone (including future me) can edit.",
   avatarUrl: "",
   skills: [
     { name: "Rust", icon: undefined },
@@ -37,12 +37,6 @@ export const DATA = {
         name: "GitHub",
         url: "https://github.com/RoddyH17",
         icon: Icons.github,
-        navbar: true,
-      },
-      Website: {
-        name: "Website",
-        url: "https://roddy95o.com",
-        icon: Icons.globe,
         navbar: true,
       },
       email: {

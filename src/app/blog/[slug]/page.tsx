@@ -9,18 +9,22 @@ import Link from "next/link";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
 function getSortedPosts() {
-  return [...allPosts].sort((a, b) => {
-    if (new Date(a.publishedAt) > new Date(b.publishedAt)) {
-      return -1;
-    }
-    return 1;
-  });
+  return [...allPosts]
+    .filter((post) => !post.draft)
+    .sort((a, b) => {
+      if (new Date(a.publishedAt) > new Date(b.publishedAt)) {
+        return -1;
+      }
+      return 1;
+    });
 }
 
 export async function generateStaticParams() {
-  return allPosts.map((post) => ({
-    slug: post._meta.path.replace(/\.mdx$/, ""),
-  }));
+  return allPosts
+    .filter((post) => !post.draft)
+    .map((post) => ({
+      slug: post._meta.path.replace(/\.mdx$/, ""),
+    }));
 }
 
 export async function generateMetadata({
@@ -103,9 +107,7 @@ export default async function Blog({
     datePublished: post.publishedAt,
     dateModified: post.publishedAt,
     description: post.summary,
-    image: post.image
-      ? `${DATA.url}${post.image}`
-      : `${DATA.url}/blog/${slug}/opengraph-image`,
+    ...(post.image && { image: `${DATA.url}${post.image}` }),
     url: `${DATA.url}/blog/${slug}`,
     author: {
       "@type": "Person",
