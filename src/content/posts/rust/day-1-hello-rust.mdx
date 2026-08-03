@@ -1,0 +1,54 @@
+---
+title: "Day 1 · Hello Rust — Setup and First Program"
+pubDate: "2026-07-31"
+author: "Roddy"
+description: "Learning Rust as my first programming language, starting from zero: install the toolchain with rustup, compile hello world with rustc, create a project with cargo."
+categories: ['rust']
+---
+
+# Day 1 · Hello Rust
+
+I am learning Rust as my first programming language, starting from zero. This series has one post per day. The blog posts describe what I learned; the full technical details (commands, concepts, problems) are in the daily notes in the code repository.
+
+> 📁 Today's code: [`day1/`](https://github.com/RoddyH17/rust_learn/tree/main/day1) · 📝 Notes: [`day1/NOTES.md`](https://github.com/RoddyH17/rust_learn/blob/main/day1/NOTES.md)
+
+## What I did
+
+One command installs the whole environment:
+
+```bash
+curl --proto '=https' --tlsv1.2 https://sh.rustup.rs -sSf | sh
+```
+
+This installs more than a compiler. It is a full set of tools that work together: `rustc` (compiler), `cargo` (project tool), `clippy` (code checker), `rustfmt` (formatter), and `rust-analyzer` (editor support). All of them are official, so there is nothing to choose.
+
+Then I wrote hello world in two ways. First with `rustc main.rs` directly, to see the basic step: source code goes in, a runnable binary comes out. Then with `cargo new`, to learn the normal daily workflow (`cargo run` / `cargo check`).
+
+## First thing I learned: the `!` in println!
+
+```rust
+fn main() {
+    println!("Hello, world!");
+}
+```
+
+The `!` means `println!` is a **macro**, not a normal function. I do not need to understand macros yet, but there is one practical effect: the format string is checked at **compile time**.
+
+```rust
+println!("day {}", 1);   // OK
+println!("day {}");      // compile error: placeholder has no matching argument
+```
+
+A wrong format string stops the program from compiling. The error appears before the program ever runs.
+
+## Notes on the day
+
+As a beginner, having only one official path for everything (install, create project, build, run) was helpful. There were no tool choices to make, so I could spend all my attention on the language itself.
+
+The compiler error messages are detailed. They say what is wrong, where, and often how to fix it. I plan to use "write something wrong on purpose and read the error" as a regular way to learn.
+
+Tomorrow: variables, mutability, and ownership — the core concept of Rust.
+
+---
+
+*One post per day. Code and notes are in [rust_learn](https://github.com/RoddyH17/rust_learn). Each `dayN/` folder is a project you can run with `cargo run`, with a `NOTES.md` for the details.*

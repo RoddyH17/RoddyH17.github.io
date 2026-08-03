@@ -1,0 +1,52 @@
+---
+title: "Day 2 · Ownership — The Core Concept of Rust"
+pubDate: "2026-08-03"
+author: "Roddy"
+description: "Variables are immutable by default, every value has one owner, and borrowing follows one rule. Day two covers ownership and borrowing."
+categories: ['rust']
+---
+
+# Day 2 · Ownership
+
+Today's topic is ownership. Most Rust learning material calls it the most important concept in the language. The rules themselves are short — three rules for ownership, one rule for borrowing.
+
+> 📁 Today's code: [`day2/ownership/`](https://github.com/RoddyH17/rust_learn/tree/main/day2/ownership) · 📝 Notes: [`day2/NOTES.md`](https://github.com/RoddyH17/rust_learn/blob/main/day2/NOTES.md)
+
+## Variables are immutable by default
+
+```rust
+let x = 5;
+x = 6;   // compile error: cannot assign twice to immutable variable
+```
+
+To change a variable, you must write `let mut x = 5;`. The practical effect: when you read code and see a variable without `mut`, you know it never changes. The compiler guarantees it.
+
+## Every value has one owner
+
+The three ownership rules: every value has one owner; only one owner at a time; when the owner goes out of scope, the value is cleaned up.
+
+The surprising part is that assignment can **move** ownership:
+
+```rust
+let s1 = String::from("hello");
+let s2 = s1;                 // ownership moves from s1 to s2
+println!("{}", s1);          // compile error: value borrowed here after move
+```
+
+After the move, `s1` is no longer usable. To get two copies of the data, you write `s1.clone()` explicitly. This design is why Rust works without a garbage collector: who cleans up each value, and when, is decided at compile time.
+
+## Borrowing: lend a value without giving it away
+
+Passing a value to a function moves ownership into the function. Usually that is not what you want. The solution is references: `&s` lends the value read-only, `&mut s` lends it and allows changes. There is one rule: **at any time, either any number of read-only references, or exactly one mutable reference.**
+
+A useful exercise today: the code has two error lines commented out. Uncommenting them and reading the compiler output shows exactly where ownership moves and where the old name stops being valid.
+
+## Notes on the day
+
+The ownership rules are few and concrete. Concepts that sounded abstract before — memory safety, data races — come down to rules the compiler checks on every build. The cost is that some code that looks fine gets rejected, and you have to understand why.
+
+Tomorrow: structs — defining my own types.
+
+---
+
+*One post per day. Code and notes are in [rust_learn](https://github.com/RoddyH17/rust_learn). Each `dayN/` folder is a project you can run with `cargo run`, with a `NOTES.md` for the details.*

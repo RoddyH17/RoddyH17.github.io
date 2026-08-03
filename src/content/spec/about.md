@@ -1,15 +1,14 @@
 ---
-title: 关于
-pubDate: 2026-08-03
+title: About
+pubDate: 2026-07-31
 ---
 
-这里是 Roddy 的公开学习志:一天一篇,把学到的东西写下来。
+This is Roddy's Learn and Reflection's Wikipedia, topics varied but concentrated on Crypto markets, Tech, and Math.
 
-当前的内容线:
+The current everyday timeline reveals itself in the following:
 
-- **rust_learn** — 每日 Rust 学习,从一个 C++ / Python / quant 背景出发,记录 Rust 与 C++ 的分岔点。配套代码在 [RoddyH17/rust_learn](https://github.com/RoddyH17/rust_learn),每个 `dayN/` 都是可直接 `cargo run` 的项目。
-- **crypto_map** — Crypto 数据版图:数据管道、链上指标、各平台 API 的坑。
+- **Rust** : Includes a daily digestion on a rust topic, start from the basics and gradually moves to developing web3 products, focused on Solana ecosystem and dex trading products. The complete roadmap can be found in here: [RoddyH17/rust_learn](https://github.com/RoddyH17/rust_learn).
 
-Cornell 数学系,ORIE minor。相信 build > depend,验证过的管道才值得信任。
+- **Crypto Market** : Analytical articles on current crypto trend, news, and research.
 
-找到我:[GitHub](https://github.com/RoddyH17) · zh89@cornell.edu
+Previous pojects can be found in here:[GitHub](https://github.com/RoddyH17).
