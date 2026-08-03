@@ -7,6 +7,8 @@
   --uno-colors-shadow: theme('colors.shadow');
 }
 html {
+  /* Base UI font size — everything is rem-based, so this scales the whole site */
+  font-size: 18px;
   --at-apply: antialiased;
   --at-apply: 'bg-background c-primary font-ui text-shadow-color-shadow';
 

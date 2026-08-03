@@ -25,6 +25,7 @@ export const userConfig: Partial<UserConfig> = {
     ],
   },
   appearance: {
+    locale: 'en-us',
     // Dune-inspired cosmic palette: desert sand by day, deep space + spice amber by night
     colorsLight: {
       primary: '#4a2f1d',
