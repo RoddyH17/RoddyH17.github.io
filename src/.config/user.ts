@@ -6,7 +6,7 @@ export const userConfig: Partial<UserConfig> = {
     subtitle: 'Amor Fati',
     author: 'Roddy',
     description:
-      'Daily learning log — Rust as a first language, crypto data, quant, and more.',
+      'Tech x Crypto Learning Roadmap — think, build, trade.',
     website: 'https://roddyh17.github.io/',
     pageSize: 10,
     socialLinks: [
