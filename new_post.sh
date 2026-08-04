@@ -25,7 +25,9 @@ cat > "$file" <<EOF
 title: "$title"
 pubDate: "$(date +%Y-%m-%d)"
 author: "Roddy"
-description: "TODO: 一句话摘要"
+description: "TODO: one-line summary"
+# mood: 3   # 1-5, uncomment and fill at wrap-up
+# pace: 3   # 1-5, uncomment and fill at wrap-up
 categories: ['$category']
 draft: true
 ---

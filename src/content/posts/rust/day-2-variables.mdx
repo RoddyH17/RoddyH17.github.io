@@ -1,0 +1,57 @@
+---
+title: "Day 2 · Variables — const, static, Mutability, Shadowing, References"
+pubDate: "2026-08-04"
+author: "Roddy"
+mood: 5
+pace: 5
+description: "How Rust handles variables: compile-time constants, global statics, when a value is allowed to change, shadowing, and lending values with references."
+categories: ['rust']
+---
+
+# Day 2 · Variables
+
+Today's topic is variables in the wide sense: constants, globals, mutability, shadowing, and references. The theme that connects them: Rust asks you to state up front whether a value can change, and checks it at compile time.
+
+> 📁 Today's code: [`day2/variables/`](https://github.com/RoddyH17/rust_learn/tree/main/day2/variables) · 📝 Notes and rubric: [`day2/NOTES.md`](https://github.com/RoddyH17/rust_learn/blob/main/day2/NOTES.md)
+
+## Four ways to hold a value
+
+```rust
+const MAX_DAYS: u32 = 100;      // compile-time constant, can never change
+static LANGUAGE: &str = "Rust"; // global, one address, lives the whole program
+
+fn main() {
+    let x = 5;                  // local, immutable by default
+    let mut y = 5;              // local, reassignable — the only one
+    y += 1;
+}
+```
+
+Only `let mut` can be reassigned. `const` is fixed at compile time. A `static` is global but still read-only — a mutable global (`static mut`) requires `unsafe` for every access, so Rust makes global mutable state possible but deliberately inconvenient.
+
+One naming detail: some languages call `TypeName::function()` a "static method". In Rust that is an *associated function* and has nothing to do with the `static` keyword.
+
+## Shadowing is not mutation
+
+```rust
+let spaces = "   ";        // a string
+let spaces = spaces.len(); // a number — new variable, same name
+```
+
+`let` with the same name creates a new variable that hides the old one. Two differences from `mut`: the type may change, and the new variable is still immutable. It is useful for step-by-step transformations without inventing extra names.
+
+## References: lend, don't give
+
+Passing a `String` into a function moves it in; the caller loses it. A reference lends it instead:
+
+```rust
+fn length_of(text: &String) -> usize { text.len() }   // read-only borrow
+fn add_world(text: &mut String) { text.push_str(", world"); } // writable borrow
+```
+
+The rule the compiler enforces: at any time, either any number of read-only references, or exactly one mutable reference — never both.
+
+## Practice
+
+I set up five exercises in [`examples/practice.rs`](https://github.com/RoddyH17/rust_learn/blob/main/day2/variables/examples/practice.rs), runnable with `cargo run --example practice`: fix a compile error two ways, declare a const and a static, shadow a string into a number, write a `&mut` function, and predict which line breaks the borrowing rule. The self-check rubric is in the [notes](https://github.com/RoddyH17/rust_learn/blob/main/day2/NOTES.md).
+

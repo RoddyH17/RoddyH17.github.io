@@ -39,9 +39,9 @@ impl Rectangle {
 
 A function in an `impl` block without `self` is called an associated function. It is called as `Rectangle::square(20)` and is commonly used as a constructor.
 
-## Ownership appears again
+## A first look at moves
 
-The struct update syntax `..user2` takes the remaining fields from another instance. String fields are moved by this, so `user2.email` is no longer usable afterward. The Day 2 rules are not a separate chapter — they apply everywhere in the language.
+The struct update syntax `..user2` takes the remaining fields from another instance. String fields are **moved** by this — ownership of the data transfers to the new instance — so `user2.email` is no longer usable afterward. Moves and ownership deserve their own day; this was a first encounter.
 
 ## Notes on the day
 

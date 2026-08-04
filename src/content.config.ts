@@ -16,6 +16,9 @@ const posts = defineCollection({
         .refine(img => Math.max(img.width, img.height) <= 4096, { message: 'Width and height of the banner must less than 4096 pixels' })
         .optional(),
       author: z.string().optional(),
+      // Daily learning log stats (1 = low, 5 = high), used by the heatmap/histogram widgets
+      mood: z.number().int().min(1).max(5).optional(),
+      pace: z.number().int().min(1).max(5).optional(),
       commentsUrl: z.string().optional(),
       source: z.optional(z.object({ url: z.string(), title: z.string() })),
       enclosure: z.optional(z.object({ url: z.string(), length: z.number(), type: z.string() })),
