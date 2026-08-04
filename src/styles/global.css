@@ -19,6 +19,16 @@ html {
     linear-gradient(to bottom, var(--uno-colors-shadow) 1px, transparent 1px);
 }
 
+/* The typography preset caps .prose at 65ch, which squeezes code blocks and
+   wraps their comments. Let the article fill its grid column; keep body text
+   at a readable ~70ch, but let code blocks (pre) use the full column width. */
+html .prose {
+  max-width: none;
+}
+html .prose > :not(pre):not(.code-container) {
+  max-width: 70ch;
+}
+
 /* Dune palette for prose content — the typography preset's gray defaults
    don't follow theme colors, so remap them for both modes. */
 html .prose {
