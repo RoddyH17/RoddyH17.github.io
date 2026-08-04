@@ -26,8 +26,7 @@ title: "$title"
 pubDate: "$(date +%Y-%m-%d)"
 author: "Roddy"
 description: "TODO: one-line summary"
-# mood: 3   # 1-5, uncomment and fill at wrap-up
-# pace: 3   # 1-5, uncomment and fill at wrap-up
+# mood: [zen]   # tags: zen = calm | sorge = frustrated | frage = unresolved question
 categories: ['$category']
 draft: true
 ---

@@ -54,7 +54,10 @@ export function getPostDescription(post: Post) {
 }
 
 export function formatDate(date: Date, format: string = 'YYYY-MM-DD') {
-  return dayjs(date).format(format)
+  // Frontmatter dates like "2026-08-04" are parsed as UTC midnight; formatting
+  // them in local time shifts the day. Shift back so the displayed date matches
+  // the date written in frontmatter.
+  return dayjs(new Date(date.getTime() + date.getTimezoneOffset() * 60000)).format(format)
 }
 
 export function getPathFromCategory(

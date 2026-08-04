@@ -1,0 +1,208 @@
+---
+// Learning-log widgets for the right column: a contribution heatmap ("Toxicity")
+// and a mood-tag histogram ("Mood Spread").
+// Data source: posts frontmatter (pubDate + mood tags) of the 'rust' category.
+// Mood tags: zen (calm) / sorge (frustrated) / frage (unresolved question).
+// Moods are shown ONLY in aggregate here — never attached to a specific post.
+// Colors use only the theme variables, so light/dark mode works automatically.
+import { getCollection } from 'astro:content'
+
+const rustPosts = await getCollection('posts', ({ data }) => !data.draft && data.categories.includes('rust'))
+
+type Mood = 'zen' | 'sorge' | 'frage'
+
+interface DayLog {
+  date: Date
+  dayNum: number
+  moods: Mood[]
+}
+
+const logs: DayLog[] = rustPosts
+  .map((p) => {
+    const m = p.data.title.match(/Day\s+(\d+)/i)
+    return {
+      date: p.data.pubDate,
+      dayNum: m ? Number(m[1]) : 0,
+      moods: (p.data.mood ?? []) as Mood[],
+    }
+  })
+  .sort((a, b) => a.dayNum - b.dayNum)
+
+// Frontmatter dates are UTC midnight, so read them with UTC accessors;
+// the calendar grid below is also built in UTC to match.
+const dateKey = (d: Date) =>
+  `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
+const byDate = new Map(logs.map((l) => [dateKey(l.date), l]))
+
+// ---------- 1. Toxicity heatmap: last 12 weeks, Sunday-first columns ----------
+// Cell darkness = the most "toxic" mood of the day: zen < frage < sorge.
+const TOX_ALPHA: Record<Mood, number> = { zen: 0.35, frage: 0.65, sorge: 1 }
+const dayAlpha = (l: DayLog) => (l.moods.length ? Math.max(...l.moods.map((m) => TOX_ALPHA[m])) : 0.5)
+
+const WEEKS = 12
+const PITCH = 16
+const CELL = 12
+const now = new Date()
+// "today" as a UTC date carrying the local calendar date
+const today = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()))
+const start = new Date(today)
+start.setUTCDate(start.getUTCDate() - start.getUTCDay() - (WEEKS - 1) * 7)
+
+interface Cell {
+  x: number
+  y: number
+  alpha: number | null
+  label: string
+}
+const cells: Cell[] = []
+for (let w = 0; w < WEEKS; w++) {
+  for (let d = 0; d < 7; d++) {
+    const date = new Date(start)
+    date.setUTCDate(start.getUTCDate() + w * 7 + d)
+    if (date > today) continue
+    const log = byDate.get(dateKey(date))
+    cells.push({
+      x: w * PITCH,
+      y: d * PITCH,
+      alpha: log ? dayAlpha(log) : null,
+      label: log
+        ? `Day ${log.dayNum} · ${dateKey(date)}${log.moods.length ? ` · ${log.moods.join(' + ')}` : ''}`
+        : dateKey(date),
+    })
+  }
+}
+const heatW = WEEKS * PITCH - (PITCH - CELL)
+const heatH = 7 * PITCH - (PITCH - CELL)
+
+// ---------- 2. Mood Spread: how many days carry each tag ----------
+const MOODS: Mood[] = ['zen', 'sorge', 'frage']
+const counts = MOODS.map((m) => ({
+  mood: m,
+  count: logs.filter((l) => l.moods.includes(m)).length,
+}))
+const maxCount = Math.max(...counts.map((c) => c.count), 1)
+const HIST_H = 74
+const BAR_W = 26
+const histX = (i: number) => 14 + i * ((heatW - 28 - BAR_W) / (MOODS.length - 1))
+---
+
+<aside class="learning-pulse">
+  <section>
+    <h3>Toxicity</h3>
+    <svg viewBox={`0 0 ${heatW} ${heatH}`} width="100%" role="img" aria-label="Daily learning heatmap">
+      {
+        cells.map((c) => (
+          <rect
+            x={c.x}
+            y={c.y}
+            width={CELL}
+            height={CELL}
+            rx="1"
+            fill={c.alpha != null ? 'var(--uno-colors-primary)' : 'none'}
+            fill-opacity={c.alpha ?? undefined}
+            stroke="var(--uno-colors-primary)"
+            stroke-opacity={c.alpha != null ? 0 : 0.18}
+          >
+            <title>{c.label}</title>
+          </rect>
+        ))
+      }
+    </svg>
+  </section>
+
+  {
+    logs.some((l) => l.moods.length > 0) && (
+      <section>
+        <h3>Mood Spread</h3>
+        <svg viewBox={`0 0 ${heatW} ${HIST_H}`} width="100%" role="img" aria-label="Histogram of mood tags">
+          {counts.map((c, i) => {
+            const h = (c.count / maxCount) * 40
+            return (
+              <g>
+                {c.count > 0 && (
+                  <rect
+                    x={histX(i)}
+                    y={56 - h}
+                    width={BAR_W}
+                    height={h}
+                    fill="var(--uno-colors-primary)"
+                    fill-opacity="0.55"
+                  />
+                )}
+                {c.count > 0 && (
+                  <line
+                    x1={histX(i)}
+                    y1={56 - h}
+                    x2={histX(i) + BAR_W}
+                    y2={56 - h}
+                    stroke="var(--uno-colors-primary)"
+                    stroke-width="1.5"
+                  />
+                )}
+                <text x={histX(i) + BAR_W / 2} y={56 - h - 4} text-anchor="middle" class="count">
+                  {c.count}
+                </text>
+                <text x={histX(i) + BAR_W / 2} y={HIST_H - 2} text-anchor="middle" class="axis">
+                  {c.mood}
+                </text>
+              </g>
+            )
+          })}
+          <line
+            x1="4"
+            y1="56.5"
+            x2={heatW - 4}
+            y2="56.5"
+            stroke="var(--uno-colors-primary)"
+            stroke-opacity="0.35"
+            stroke-width="1"
+          />
+        </svg>
+      </section>
+    )
+  }
+</aside>
+
+<style>
+  .learning-pulse {
+    display: none;
+  }
+
+  @media (min-width: 1024px) {
+    .learning-pulse {
+      display: flex;
+      flex-direction: column;
+      gap: 1.4rem;
+      margin-top: 2.5rem;
+      max-width: 15rem;
+    }
+  }
+
+  .learning-pulse h3 {
+    font-size: 0.7rem;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    opacity: 0.75;
+    margin-bottom: 0.6rem;
+    font-weight: normal;
+  }
+
+  .learning-pulse .axis {
+    font-size: 8px;
+    fill: var(--uno-colors-primary);
+    fill-opacity: 0.75;
+    font-family: inherit;
+    letter-spacing: 0.08em;
+  }
+
+  .learning-pulse .count {
+    font-size: 8px;
+    fill: var(--uno-colors-primary);
+    fill-opacity: 0.9;
+    font-family: inherit;
+  }
+
+  .learning-pulse svg {
+    overflow: visible;
+  }
+</style>

@@ -1,5 +1,6 @@
 ---
 import { themeConfig } from '~/.config'
+import LearningPulse from '~/components/LearningPulse.astro'
 import SiteFooter from '~/components/SiteFooter.astro'
 import SiteNavigation from '~/components/SiteNavigation.astro'
 import SiteTitle from '~/components/SiteTitle.astro'
@@ -33,6 +34,7 @@ const dark = themeConfig.appearance.theme === 'dark'
     >
       <SiteTitle />
       <SiteNavigation />
+      <LearningPulse />
     </header>
 
     <main class="transition-swup-main overflow-y-scroll scrollbar-hide outline-none" lg="row-1-3 col-1-2 py-20 ">

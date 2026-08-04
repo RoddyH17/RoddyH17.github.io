@@ -1,25 +1,38 @@
 ---
 import type { Post } from '~/types'
-import { formatDate } from '~/utils'
 import PostCategory from './PostCategory.astro'
 
 interface Props {
   post: Post
+  // 'list': linked title + categories (no date, no mood — mood stays private).
+  // 'post': plain title only.
+  mode?: 'list' | 'post'
 }
 
-const { post } = Astro.props
-const { translate: t } = Astro.locals
+const { post, mode = 'list' } = Astro.props
 
 const categoryList = post.data.categories ?? []
 ---
 
 <header flex="~ col gap-2">
   <h1 class="post-title">
-    <a class="not-prose" href={`/posts/${post.id}/`}>{post.data.title}</a>
+    {
+      mode === 'list' ? (
+        <a class="not-prose" href={`/posts/${post.id}/`}>
+          {post.data.title}
+        </a>
+      ) : (
+        post.data.title
+      )
+    }
   </h1>
-  <div class="text-3.5">
-    <span>{t(post.data.modDate ? 'updated_at' : 'posted_at')}</span>
-    <time>{formatDate(post.data.modDate ?? post.data.pubDate)}</time>
-    {categoryList.map((category) => <PostCategory category={category} />)}
-  </div>
+  {
+    mode === 'list' && (
+      <div class="text-3.5">
+        {categoryList.map((category) => (
+          <PostCategory category={category} />
+        ))}
+      </div>
+    )
+  }
 </header>
