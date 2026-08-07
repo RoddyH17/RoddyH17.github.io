@@ -1,38 +1,59 @@
 ---
 // Learning-log widgets for the right column: a contribution heatmap ("Toxicity")
 // and a mood-tag histogram ("Mood Spread").
-// Data source: posts frontmatter (pubDate + mood tags) of the 'rust' category.
-// Mood tags: zen (calm) / sorge (frustrated) / frage (unresolved question).
+//
+// The heatmap lights a cell for ANY published day — every posts category plus
+// research notes, not just the Rust series. It used to filter on
+// categories.includes('rust'), which silently left a hole on days whose only
+// output was a crypto post or a research note (2026-08-05 was blank despite
+// the Uniswap note shipping that day).
+//
+// Mood tags (zen = calm / sorge = frustrated / frage = unresolved question) only
+// exist on the daily Rust posts. A day without them still lights, at the neutral
+// 0.5 opacity — publishing is what lights the cell; mood only sets the shade.
 // Moods are shown ONLY in aggregate here — never attached to a specific post.
 // Colors use only the theme variables, so light/dark mode works automatically.
 import { getCollection } from 'astro:content'
 
-const rustPosts = await getCollection('posts', ({ data }) => !data.draft && data.categories.includes('rust'))
+const posts = await getCollection('posts', ({ data }) => !data.draft)
+const research = await getCollection('research', ({ data }) => !data.draft)
 
 type Mood = 'zen' | 'sorge' | 'frage'
 
 interface DayLog {
   date: Date
-  dayNum: number
+  dayNum: number | null
+  titles: string[]
   moods: Mood[]
 }
-
-const logs: DayLog[] = rustPosts
-  .map((p) => {
-    const m = p.data.title.match(/Day\s+(\d+)/i)
-    return {
-      date: p.data.pubDate,
-      dayNum: m ? Number(m[1]) : 0,
-      moods: (p.data.mood ?? []) as Mood[],
-    }
-  })
-  .sort((a, b) => a.dayNum - b.dayNum)
 
 // Frontmatter dates are UTC midnight, so read them with UTC accessors;
 // the calendar grid below is also built in UTC to match.
 const dateKey = (d: Date) =>
   `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
-const byDate = new Map(logs.map((l) => [dateKey(l.date), l]))
+
+const published = [
+  ...posts.map((p) => ({ date: p.data.pubDate, title: p.data.title, moods: (p.data.mood ?? []) as Mood[] })),
+  ...research.map((r) => ({ date: r.data.pubDate, title: r.data.title, moods: [] as Mood[] })),
+]
+
+// Group by day, because more than one thing can ship on the same date and a day
+// only has one cell. Merging (rather than overwriting) keeps every title in the
+// tooltip and unions the moods.
+const byDate = new Map<string, DayLog>()
+for (const item of published) {
+  const key = dateKey(item.date)
+  const log = byDate.get(key) ?? { date: item.date, dayNum: null, titles: [], moods: [] }
+  log.titles.push(item.title)
+  for (const m of item.moods) {
+    if (!log.moods.includes(m)) log.moods.push(m)
+  }
+  const dayMatch = item.title.match(/Day\s+(\d+)/i)
+  if (dayMatch) log.dayNum = Number(dayMatch[1])
+  byDate.set(key, log)
+}
+
+const logs: DayLog[] = [...byDate.values()].sort((a, b) => a.date.getTime() - b.date.getTime())
 
 // ---------- 1. Toxicity heatmap: last 12 weeks, Sunday-first columns ----------
 // Cell darkness = the most "toxic" mood of the day: zen < frage < sorge.
@@ -65,8 +86,18 @@ for (let w = 0; w < WEEKS; w++) {
       x: w * PITCH,
       y: d * PITCH,
       alpha: log ? dayAlpha(log) : null,
+      // Rust days are identified by number. Anything else — and any extra item
+      // shipped the same day — is named by title, so a lit cell always says
+      // what was actually published rather than silently hiding a second post.
       label: log
-        ? `Day ${log.dayNum} · ${dateKey(date)}${log.moods.length ? ` · ${log.moods.join(' + ')}` : ''}`
+        ? [
+            log.dayNum ? `Day ${log.dayNum}` : null,
+            dateKey(date),
+            log.dayNum && log.titles.length === 1 ? null : log.titles.join(' + '),
+            log.moods.length ? log.moods.join(' + ') : null,
+          ]
+            .filter(Boolean)
+            .join(' · ')
         : dateKey(date),
     })
   }
