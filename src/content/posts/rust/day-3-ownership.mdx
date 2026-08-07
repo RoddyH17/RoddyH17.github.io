@@ -1,0 +1,250 @@
+---
+title: "Day 3 · Ownership — Who Frees This Memory"
+pubDate: "2026-08-06"
+author: "Roddy"
+mood: [zen]
+description: "Every language has to answer one question: who frees this memory. C says you do, Java says a collector does, Rust says the owner does — and checks it at compile time. Move, clone, borrowing, and NLL are all consequences of that one answer."
+categories: ['rust']
+---
+
+# Day 3 · Ownership
+
+Day 2 ended on a puzzle: a `for` loop over an array of `String` destroyed the array, but the identical loop over numbers did not. This is the chapter that explains it — and the chapter the rest of Rust is built on.
+
+Underneath everything today there is a single question. **When a value lives on the heap, who is responsible for freeing it?** Every language has to answer it, and the answer shapes the whole language.
+
+> Today's code: [`day3/ownership/`](https://github.com/RoddyH17/rust_learn/tree/main/day3/ownership) · Notes and rubric: [`day3/NOTES.md`](https://github.com/RoddyH17/rust_learn/blob/main/day3/NOTES.md)
+
+## Three answers to one question
+
+| Language | Answer | What it costs |
+|---|---|---|
+| C / C++ | You are | Forget → leak. Too early → dangling pointer. Twice → double free. |
+| Java / Go / Python | A garbage collector, at runtime | Runtime overhead, unpredictable pauses |
+| **Rust** | Exactly one variable **owns** it; freed when the owner leaves scope | Checked at **compile time**, zero runtime cost |
+
+The GC answer is not free the way it looks. A collector has to run, which means it has to take CPU on its own schedule — mark-and-sweep, mark-and-compact, generational collection are all strategies for deciding *when* to pay. In a browser that shows up as the UI thread stalling.
+
+Rust takes the third path: the compiler already knows where every variable's scope ends, so it can insert the free itself. Nothing runs at runtime to figure it out.
+
+## Where a value actually lives
+
+The stack is the easy part. Values go on in order and come off in the opposite order — last in, first out, like a stack of plates. Everything on it must have a size known at compile time, because that is what lets the machine just move a pointer up and down.
+
+The heap is the messy part. You ask the allocator for space, it goes looking for a gap big enough, marks it as used, and hands back a pointer. Pushing to the stack is faster simply because the allocator never has to search — the spot is always the top.
+
+So far this is the standard picture. Then I opened a debugger on a string literal, and the picture turned out to have **three** places in it, not two.
+
+```rust
+let literal = "I am hardcoded into the executable";
+```
+
+The debugger showed me `[0] = 73`. I assumed for a moment that this was an address. It is not:
+
+```text
+73 (decimal) = 0x49 (hex) = the ASCII character 'I'
+```
+
+It is the first UTF-8 **byte** of the string. The debugger had followed the pointer and expanded the bytes behind it. The actual layout is:
+
+```text
+literal on the stack (&str, 16 bytes)
+┌─────────────────────────┐
+│ pointer ────────────────┼──→ read-only static section of the binary
+│ length = 34             │     [73, 32, 97, 109, ...]
+└─────────────────────────┘     I   ' '  a    m
+```
+
+So a string literal is not on the stack and not on the heap. The **pointer and the length** are on the stack; the **characters** are compiled into a read-only section of the executable itself. That is the third place, and it is why literals can never be modified.
+
+Compare that with a `String`:
+
+| | `"hello"` | `String::from("hello")` |
+|---|---|---|
+| Type | `&'static str` | `String` |
+| Owns the characters? | No, only refers to them | Yes |
+| Where the characters live | Read-only section of the binary | Heap |
+| On the stack | pointer + length | pointer + length + capacity |
+| Can it grow? | No | Yes |
+| On assignment | `Copy` the reference | `Move` the ownership |
+| Leaving scope | Frees nothing | Frees the heap data |
+
+That last row is the whole rest of the day.
+
+## Assignment is a transfer, not a copy
+
+```rust
+let s1 = String::from("hello");
+let s2 = s1;
+```
+
+The three stack fields — pointer, length, capacity — get copied into `s2`. The heap bytes do not. So now two variables point at the same heap allocation, and when both go out of scope, both will try to free it. That is a **double free**, one of the classic ways a C program becomes a security bug.
+
+Rust's fix is not to copy the heap data. It is to declare that `s1` is no longer valid the moment `s2` is created. Use `s1` afterwards and the program does not compile.
+
+The way I ended up phrasing it in my notes: **Rust never does a deep copy.** A plain assignment always moves. If you want the expensive thing, you have to ask for it by name.
+
+## `.clone()` is expensive on purpose
+
+```rust
+let s1 = String::from("hello");
+let s2 = s1.clone();
+
+println!("s1 = {s1}, s2 = {s2}");
+```
+
+Now the heap data really is duplicated and both variables are valid. The point is not that `clone` exists — it is that it is **visible**. When you read `.clone()` you know some arbitrary and possibly expensive code is running there. In a language where copying is implicit, that cost is invisible at the call site.
+
+## Passing to a function is also a move
+
+```rust
+fn main() {
+    let s = String::from("hello");
+
+    takes_ownership(s);             // s moves into the function...
+                                    // ...and is no longer valid here
+
+    let x = 5;
+
+    makes_copy(x);                  // i32 implements Copy, so x does NOT move
+                                    // and is still usable afterwards
+}
+
+fn takes_ownership(some_string: String) {
+    println!("{some_string}");
+} // some_string goes out of scope, `drop` runs, the heap memory is freed
+
+fn makes_copy(some_integer: i32) {
+    println!("{some_integer}");
+} // nothing special happens
+```
+
+A function call is just another binding, so it follows the same rule. That also means a function can hand ownership back by returning it:
+
+```rust
+fn take_ownership(s: String) -> String {
+    println!("{}", s);
+    s
+}
+```
+
+```text
+s1 owns the String
+   │ take_ownership(s1) — move
+   ▼
+parameter s owns it
+   │ returns s — move
+   ▼
+s2 owns it
+```
+
+Nothing on the heap is copied at any point. Only the ownership label moves.
+
+I got this wrong the first time in a way worth recording. I wrote:
+
+```rust
+fn take_ownership(&s: String)
+```
+
+thinking the `&` made the parameter a reference. It does not. The parameter syntax is `name: type`, so the `&` has to be on the **type**: `s: &String`. And in this particular exercise I could not use a reference anyway — the caller was not allowed to change, and switching to borrowing would have required writing `take_ownership(&s1)` at the call site.
+
+The other half of that mistake: the returned `s` must not have a semicolon. With one, it is a statement, and the function silently returns `()` instead.
+
+## Moving one field moves part of the whole
+
+```rust
+let t = (String::from("hello"), String::from("world"));
+let _s = t.0;
+
+println!("{:?}", t.1);      // fine
+println!("{:?}", t);        // does not compile
+```
+
+`t.0` moved out on its own. The tuple is now partially moved: the piece that left is gone, the piece that stayed is still usable, but `t` as a single value no longer exists. Ownership tracks parts, not just whole variables.
+
+## Borrowing: lend it, don't give it
+
+Moving ownership into every function that needs to read a value would be unbearable. A reference is the alternative — an address you can follow, that does not own what it points at.
+
+```rust
+fn main() {
+    let s1 = String::from("hello");
+
+    let len = calculate_length(&s1);
+
+    println!("The length of '{s1}' is {len}.");
+}
+
+fn calculate_length(s: &String) -> usize {
+    s.len()
+}
+```
+
+Because the reference does not own the value, nothing is dropped when the reference goes away. Creating one is called **borrowing**, and the metaphor is exact: you can borrow something from someone, but you have to give it back, and it was never yours.
+
+To modify through a borrow you need `&mut`, and that is where the restriction appears: **if you have a mutable reference to a value, you can have no other reference to it at the same time.** Not a second mutable one, and not an immutable one either.
+
+The reason is not arbitrary. Someone holding a read-only reference does not expect the value to change underneath them. Multiple readers are fine, because reading cannot disturb another reader.
+
+## A borrow lives until its last use, not until the closing brace
+
+This one surprised me:
+
+```rust
+fn main() {
+    let mut s = String::from("hello, ");
+
+    let r1 = &mut s;
+    r1.push_str("world");   // last use of r1 → its lifetime ends here
+
+    let r2 = &mut s;        // so a second &mut is completely fine
+    r2.push_str("!");
+}
+```
+
+Two mutable borrows in one scope, and it compiles. The borrow checker does not look at where the braces are — it looks at where a reference is **last actually used**. This is called **Non-Lexical Lifetimes**.
+
+Add one more use of `r1` after `r2` is created, even just a `println!`, and the two live ranges overlap and it fails immediately: `cannot borrow s as mutable more than once at a time`.
+
+## Dangling references do not compile
+
+The classic C++ trap is returning a pointer to a local variable: the function returns, the local dies, and the caller is holding an address to freed memory.
+
+```rust
+fn dangle() -> &String {
+    let s = String::from("hello");
+    &s
+}   // s is dropped here, so the returned reference points at nothing
+```
+
+Rust rejects this at compile time — *this function's return type contains a borrowed value, but there is no value for it to be borrowed from.* Not a crash in production, not undefined behaviour, just a build failure.
+
+The fix is to stop returning a reference and move the `String` itself out. Ownership transfers to the caller, and nothing gets freed on the way:
+
+```rust
+fn no_dangle() -> String {
+    let s = String::from("hello");
+    s
+}
+```
+
+## Readers can share, a writer needs exclusivity
+
+Two rules cover everything above:
+
+1. At any given time you may have **either** one mutable reference **or** any number of immutable references.
+2. References must always be valid.
+
+The way I remember it: **readers can be concurrent, a writer must be exclusive.** Which is exactly a read-write lock — the same mental model as `RwLock` in a threaded program. The difference is where the check happens. A lock checks at runtime and costs you something on every access. Rust checks the same property at compile time, and the running program pays nothing at all.
+
+## Practice
+
+Ten exercises in [`examples/practice.rs`](https://github.com/RoddyH17/rust_learn/blob/main/day3/ownership/examples/practice.rs), runnable with `cargo run --example practice`, graded 🌟 warm-up / 🌟🌟 the one that teaches something / 🌟🌟🌟 challenge.
+
+**1–6, ownership** — fix a move error as many different ways as you can, hand ownership back through a return value, repair a program without deleting a line, choose `Copy` over `clone`, watch mutability change across a transfer, and hit a partial move on a tuple.
+
+**7–10, borrowing** — take a reference, pass borrows into functions, apply the two rules to a block that breaks them, and finally an NLL puzzle: work out why two `&mut` in one scope compile, then do the same job with `ref` on the other side of the `=` and prove with addresses that no copy was made.
+
+The self-check questions are in the [notes](https://github.com/RoddyH17/rust_learn/blob/main/day3/NOTES.md). The one that matters most: if you cannot say out loud why `let s2 = s1;` invalidates `s1`, nothing after this chapter will make sense.
+
+Tomorrow: slices, `char` and strings, and enums.

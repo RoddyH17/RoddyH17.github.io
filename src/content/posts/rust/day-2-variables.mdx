@@ -1,90 +1,37 @@
 ---
-title: "Day 2 · Variables — Bindings, Types, Functions, Flow Control"
+title: "Day 2 · Return Values, Expressions, and Loops"
 pubDate: "2026-08-04"
 modDate: "2026-08-06"
 author: "Roddy"
 mood: [zen, frage]
-description: "Everything before ownership: how Rust binds a value, the tuple and array types, why a semicolon changes what a function returns, and the loop that quietly eats your data."
+description: "What a function actually returns and why a semicolon can break it, if as an expression, loop labels and ranges — and the loop that quietly eats your data, which turns out to be ownership arriving a day early."
 categories: ['rust']
 ---
 
-# Day 2 · Variables
+# Day 2 · Return Values, Expressions, and Loops
 
-A long day. It covers everything from declaring a value up to the point where ownership becomes the whole subject — bindings, tuples and arrays, functions, expressions, and flow control.
+Day 1 ended on the difference between a statement and an expression. Today that one distinction does most of the work: it decides what a function returns, it lets `if` sit on the right-hand side of a `let`, and it lets `break` carry a value out of a loop.
 
-There is one idea underneath all of it: **Rust wants you to say what you mean at compile time.** Whether a value can change, what type it is, whether a loop borrows or consumes — you state it, and the compiler holds you to it. Almost every error today is the compiler asking me to be more specific.
+Then the day ends somewhere else entirely. A `for` loop destroys an array, the identical loop over numbers does not, and the explanation has nothing to do with loops.
 
-> 📁 Today's code: [`day2/variables/`](https://github.com/RoddyH17/rust_learn/tree/main/day2/variables) · 📝 Notes and rubric: [`day2/NOTES.md`](https://github.com/RoddyH17/rust_learn/blob/main/day2/NOTES.md)
+> Today's code: [`day2/variables/`](https://github.com/RoddyH17/rust_learn/tree/main/day2/variables) · Notes and rubric: [`day2/NOTES.md`](https://github.com/RoddyH17/rust_learn/blob/main/day2/NOTES.md)
 
-## Four ways to hold a value
+## The semicolon that changes what a function returns
 
-```rust
-const MAX_DAYS: u32 = 100;      // compile-time constant, can never change
-static LANGUAGE: &str = "Rust"; // global, one address, lives the whole program
-
-fn main() {
-    let x = 5;                  // local, immutable by default
-    let mut y = 5;              // local, reassignable — the only one
-    y += 1;
-}
-```
-
-Only `let mut` can be reassigned. `const` is fixed at compile time. A `static` is global but still read-only — a mutable global (`static mut`) requires `unsafe` for every access, so Rust makes global mutable state possible but deliberately inconvenient.
-
-One naming detail: some languages call `TypeName::function()` a "static method". In Rust that is an *associated function* and has nothing to do with the `static` keyword.
-
-## Shadowing is not mutation
-
-```rust
-let spaces = "   ";        // a string
-let spaces = spaces.len(); // a number — new variable, same name
-```
-
-`let` with the same name creates a new variable that hides the old one. Two differences from `mut`: the type may change, and the new variable is still immutable.
-
-The contrast is worth making precise, because I got it wrong first:
-
-```rust
-let mut spaces = "   ";
-spaces = spaces.len();     // error
-```
-
-No `let`, so this is *mutation* — same variable, and a variable's type is fixed for its whole life. `&str` is not `usize`, so the compiler rejects it. Shadowing works because it is not the same variable at all; it just reuses the name.
-
-## Tuples and arrays
-
-A tuple groups **different** types. An array holds **one** type, and its length is baked into the type.
-
-```rust
-let point: (i32, f64, u8) = (500, 6.4, 1);
-let (id, score, level) = point;   // destructuring: matches by position
-
-let nums: [i32; 5] = [1, 2, 3, 4, 5];
-let ones = [1; 5];                // five slots, all 1
-```
-
-`[i32; 5]` and `[i32; 4]` are **two different types**. That is what lets an array live on the stack — the compiler knows its exact size. When you want something that can grow, you want a `Vec`, which puts its contents on the heap.
-
-Two things caught me out here. Destructuring matches by **position**, so the names on the left are arbitrary and the order is everything. And an array index is checked at *runtime*:
-
-```rust
-nums.get(10)   // None — safe, returns Option<T>
-nums[10]       // compiles fine, then panics
-```
-
-Even though the length is known at compile time, `[]` is a runtime bounds check. `.get()` is how you make the failure a value you handle instead of a crash.
-
-## Functions, and the semicolon that changes everything
-
-Every parameter needs a type annotation. That is deliberate: because signatures are always explicit, the compiler can infer types nearly everywhere else, and its error messages have something to anchor to.
-
-The return value is the **last expression, written without a semicolon**:
+A return type goes after an arrow, and the return value is the **last expression, written without a semicolon**:
 
 ```rust
 fn five() -> i32 {
     5           // no semicolon — this is the return value
 }
+
+fn main() {
+    let x = five();
+    println!("The value of x is: {x}");
+}
 ```
+
+`let x = five();` is the same as `let x = 5;`. The body is a lonely `5` because that is the expression whose value we want.
 
 Which brings up the rule that explains most of today's compiler errors:
 
@@ -99,42 +46,34 @@ fn sum(x: i32, y: i32) -> i32 {
 }
 ```
 
-A block follows the same rule, which is why a block can be assigned:
-
-```rust
-let y = {
-    let inner = 3;
-    inner + 3       // y == 6
-};
-
-let z = {
-    let inner = 3;
-    inner + 3;      // z == () — the semicolon threw the value away
-};
-```
+You can also return early with the `return` keyword, and *that* form does take a semicolon. The way I wrote it in my notes: `return` comes with a semicolon; no `return` means no semicolon.
 
 A function with no `->` returns `()`. If it only prints, that is exactly what you want.
 
 ## `if` is an expression too
 
 ```rust
-let condition = true;
-let number = if condition { 5 } else { 6 };
+fn main() {
+    let condition = true;
+    let number = if condition { 5 } else { 6 };
+
+    println!("The value of number is: {number}");
+}
 ```
 
-Since `if` produces a value, it can sit on the right of a `let`. The catch: **both arms must have the same type**, because `number` gets exactly one type and the compiler has to know it without running the program.
+Blocks evaluate to their last expression, and a bare number is an expression, so the whole `if` has a value and can sit on the right of a `let`. The catch: **both arms must have the same type**, because `number` gets exactly one type and the compiler has to know it without running the program.
 
 ```rust
 let bad = if condition { 5 } else { "six" };  // error
 ```
 
-## Loops
+## Loops, ranges, and labels
 
 Ranges follow the same left-closed, right-open convention as everything else in Rust, with `..=` as the inclusive form:
 
 ```rust
-for n in 1..4  {}   // 1, 2, 3
-for n in 1..=4 {}   // 1, 2, 3, 4
+for n in 1..4  {}           // 1, 2, 3
+for n in 1..=4 {}           // 1, 2, 3, 4
 for n in (1..=4).rev() {}   // 4, 3, 2, 1
 ```
 
@@ -146,7 +85,19 @@ for (i, v) in [4, 3, 2, 1].iter().enumerate() {
 }
 ```
 
-The manual `while index < 5 { a[index] }` version works, but it is error-prone — change the array length and forget the condition and it panics — and it pays for a bounds check on every iteration. `enumerate` cannot go out of range at all.
+The manual version works:
+
+```rust
+let a = [10, 20, 30, 40, 50];
+let mut index = 0;
+
+while index < 5 {
+    println!("the value is: {}", a[index]);
+    index += 1;
+}
+```
+
+— but it is error-prone. Change the array to four elements and forget to update the condition and it panics. It is also slower, because the compiler has to emit a bounds check on every single iteration to make sure the index is still inside the array. A `for` loop over the collection itself cannot go out of range at all, so there is nothing to check.
 
 `loop` is an expression, so `break` can carry a value out:
 
@@ -178,28 +129,41 @@ Labels start with a single quote and let an inner loop break the outer one:
 This was the real lesson of the day, and it is not a loop feature at all — it is ownership showing up early, disguised as syntax.
 
 ```rust
-let names = [String::from("liming"), String::from("hanmeimei")];
-for name in names {
-    // ...
+let v = vec![1, 2, 3];
+for element in v {
+    println!("{element}");
 }
-println!("{:?}", names);   // error: names was moved into the loop
+println!("{:?}", v);   // error: v was moved into the loop
 ```
 
 `for x in collection` **takes the collection**. After the loop, it is gone. The fix is one character:
 
 ```rust
-for name in &names { }     // borrow it instead
+for element in &v { }        // borrow it instead
 ```
 
-What makes this genuinely confusing is that the identical code with numbers works:
+and if you want to change the elements while walking them, borrow mutably and dereference:
 
 ```rust
-let numbers = [1, 2, 3];
+let mut v = vec![1, 2, 3];
+for element in &mut v {
+    if *element == 1 {
+        *element = 5;
+    }
+}
+```
+
+What makes this genuinely confusing is that the identical code with a plain array of numbers works:
+
+```rust
+let numbers = [1, 2, 3, 4];
 for n in numbers { }
 println!("{:?}", numbers);  // fine
 ```
 
-`i32` implements `Copy`, so the array is *copied* into the loop and the original is untouched. `String` does not, so it moves. Same syntax, opposite outcome, and the only thing that decides it is the element type.
+`i32` implements `Copy`, so `[i32; 4]` is `Copy` too, and the array is *copied* into the loop while the original stays untouched. A `Vec` is never `Copy` — copying one would mean either two `Vec`s pointing at the same heap block, which is a double free waiting to happen, or a silent deep copy with hidden cost. Rust refuses both, so a `Vec` can only move.
+
+Same syntax, opposite outcome, and the only thing that decides it is whether the type is `Copy`.
 
 The three forms are worth memorising as a set:
 
@@ -209,28 +173,15 @@ The three forms are worth memorising as a set:
 | `for x in &mut v` | `v.iter_mut()` | `&mut T` | usable, and modified |
 | `for x in v` | `v.into_iter()` | `T` | **consumed** — unless the element is `Copy` |
 
-A `Vec` is never `Copy`. Copying one would mean either two `Vec`s pointing at the same heap block — a double free waiting to happen — or a silent deep copy with hidden cost. Rust refuses both, so a `Vec` can only move. That is the whole argument for ownership in one example, and it is where Day 3 starts.
+`for e in &v` and `for e in v.iter()` are exactly the same thing; the first is sugar for the second. (One historical footnote worth knowing when reading old code: before Rust 1.53, `for e in array` gave you references. It gives you values now.)
 
 The practical rule: **write `&` by default**, unless you actually mean to consume the collection.
 
-## References: lend, don't give
-
-Which is the same idea one level up. Passing a `String` into a function moves it in; the caller loses it. A reference lends it instead:
-
-```rust
-fn length_of(text: &String) -> usize { text.len() }           // read-only borrow
-fn add_world(text: &mut String) { text.push_str(", world"); } // writable borrow
-```
-
-The rule the compiler enforces: at any time, either any number of read-only references, or exactly one mutable reference — never both. Readers can share; a writer needs exclusivity.
+That last table is the whole argument for ownership in one example — and it is exactly where Day 3 starts.
 
 ## Practice
 
-Ten exercises in [`examples/practice.rs`](https://github.com/RoddyH17/rust_learn/blob/main/day2/variables/examples/practice.rs), runnable with `cargo run --example practice`. They split cleanly in two.
-
-**1–5, binding a value** — fix a compile error two ways, declare a `const` and a `static`, shadow a string into a number, write a `&mut` function, and predict which line breaks the borrowing rule.
-
-**6–10, using a value** — adapted from [Rust By Practice](https://practice-rust-zh.beatai.org/) and graded the same way (🌟 warm-up, 🌟🌟 the one that teaches something, 🌟🌟🌟 challenge):
+Ten exercises in [`examples/practice.rs`](https://github.com/RoddyH17/rust_learn/blob/main/day2/variables/examples/practice.rs), runnable with `cargo run --example practice`, adapted from [Rust By Practice](https://practice-rust-zh.beatai.org/) and graded the same way (🌟 warm-up, 🌟🌟 the one that teaches something, 🌟🌟🌟 challenge).
 
 - 🌟🌟 **Statements vs expressions** — make a function return `3` by deleting one character.
 - 🌟🌟 **`if` as an expression** — one block with two errors, a type mismatch and a stray semicolon. Predicting only the first means the semicolon rule has not landed yet.
@@ -238,4 +189,4 @@ Ten exercises in [`examples/practice.rs`](https://github.com/RoddyH17/rust_learn
 - 🌟🌟 **Arrays** — predict `size_of_val(&['a','b','c'])`. It is not 3; a `char` is a 4-byte Unicode scalar value.
 - 🌟🌟🌟 **Loops and ownership** — one array survives its loop and one does not. Predict which, fix it with one character, then hand-trace a nested-label puzzle.
 
-The self-check rubric is in the [notes](https://github.com/RoddyH17/rust_learn/blob/main/day2/NOTES.md). The one that actually matters is the last: if you cannot write the three-row borrow table from memory, review it before Day 3 — ownership is the entire next chapter.
+The self-check rubric is in the [notes](https://github.com/RoddyH17/rust_learn/blob/main/day2/NOTES.md). The one that actually matters is the last: if you cannot explain why the `Vec` was consumed and the array was not, review it before Day 3 — ownership is the entire next chapter.

@@ -1,21 +1,20 @@
 ---
-title: "Day 1 · Hello Rust — Setup and First Program"
+title: "Day 1 · Setup — From rustup to the First Values"
 pubDate: "2026-07-31"
+modDate: "2026-08-06"
 author: "Roddy"
 mood: [sorge]
-description: "Learning Rust as my first programming language, starting from zero: install the toolchain with rustup, compile hello world with rustc, create a project with cargo."
+description: "Learning Rust as my first programming language, starting from zero: install the toolchain with rustup, compile hello world, then the four ways to hold a value, shadowing, tuples and arrays, and the semicolon that decides whether a block has a value."
 categories: ['rust']
 ---
 
-# Day 1 · Hello Rust
+# Day 1 · Setup
 
 I am learning Rust as my first programming language, starting from zero. This series has one post per day. The blog posts describe what I learned; the full technical details (commands, concepts, problems) are in the daily notes in the code repository.
 
 > Today's code: [`day1`](https://github.com/RoddyH17/rust_learn/tree/main/day1) · Notes: [`day1/NOTES.md`](https://github.com/RoddyH17/rust_learn/blob/main/day1/NOTES.md)
 
-## What I did
-
-One command installs the whole environment:
+## Installing everything with one command
 
 ```bash
 curl --proto '=https' --tlsv1.2 https://sh.rustup.rs -sSf | sh
@@ -25,7 +24,7 @@ This installs more than a compiler. It is a full set of tools that work together
 
 Then I wrote hello world in two ways. First with `rustc main.rs` directly, to see the basic step: source code goes in, a runnable binary comes out. Then with `cargo new`, to learn the normal daily workflow (`cargo run` / `cargo check`).
 
-## First thing I learned: the `!` in println!
+## The `!` in println!
 
 ```rust
 fn main() {
@@ -42,11 +41,107 @@ println!("day {}");      // compile error: placeholder has no matching argument
 
 A wrong format string stops the program from compiling. The error appears before the program ever runs.
 
+## Four ways to hold a value
+
+Rust is a **statically typed** language: it has to know the type of every variable at compile time. Usually it can infer that from the value and how you use it, so you do not have to write the type down everywhere.
+
+```rust
+const MAX_DAYS: u32 = 100;      // compile-time constant, can never change
+static LANGUAGE: &str = "Rust"; // global, one address, lives the whole program
+
+fn main() {
+    let x = 5;                  // local, immutable by default
+    let mut y = 5;              // local, reassignable — the only one
+    y += 1;
+}
+```
+
+The default is immutable. That is the part that takes adjusting: `let x = 5;` does not create a box you can put another number into. If you want that, you have to say `mut` and mean it.
+
+## Shadowing is not mutation
+
+These two look almost the same and behave completely differently.
+
+```rust
+fn main() {
+    let spaces = "   ";
+    let spaces = spaces.len();   // fine
+    println!("{spaces}");
+}
+```
+
+The second `let` creates a **brand-new variable** that happens to share the name. New variable, new type allowed. The old `spaces` (a `&str`) is simply gone.
+
+```rust
+fn main() {
+    let mut spaces = "   ";
+    spaces = spaces.len();       // compile error
+    println!("{spaces}");
+}
+```
+
+This one is **mutation** — no `let`, so it is reassigning the same variable. Same variable means the type has to stay the same, and `&str` is not `usize`, so the compiler refuses.
+
+So the rule is: `let` again means a new variable and the type may change; assignment means the same variable and the type may not.
+
+## Tuples and arrays
+
+A tuple groups a fixed number of values that may have different types, and you reach into it by position:
+
+```rust
+fn main() {
+    let x: (i32, f64, u8) = (500, 6.4, 1);
+
+    let five_hundred = x.0;
+    let six_point_four = x.1;
+    let one = x.2;
+}
+```
+
+An array is different: every element has the same type, and unlike arrays in many other languages, **the length is fixed**. Arrays live on the stack, which is exactly why the length has to be known — the compiler needs the size.
+
+```rust
+let a: [i32; 5] = [1, 2, 3, 4, 5];
+let a = [3; 5];                  // five elements, all 3
+```
+
+The `5` in `[i32; 5]` is part of the *type*. An array of four `i32` and an array of five `i32` are different types. When you need something that can grow, you want a `Vec`, which the standard library provides and which keeps its contents on the heap.
+
+## Functions declare their parameter types — always
+
+```rust
+fn main() {
+    print_labeled_measurement(5, 'h');
+}
+
+fn print_labeled_measurement(value: i32, unit_label: char) {
+    println!("The measurement is: {value}{unit_label}");
+}
+```
+
+Inside a function body Rust will infer types for you. In a function *signature* it never will — every parameter needs an annotation. This is deliberate: because signatures are always fully typed, the compiler almost never has to ask you for annotations anywhere else, and its error messages can be far more specific about what it expected.
+
+## Statements and expressions
+
+This is the distinction that everything else on Day 2 turns out to depend on.
+
+A **statement** does something and produces no value. `let mut x = 6;` is a statement. Because it has no value, you cannot write `let y = (let x = 6);`.
+
+An **expression** evaluates to a value. `5` is an expression. `x + 1` is an expression. A block is an expression too:
+
+```rust
+let y = {
+    let x = 3;
+    x + 1        // no semicolon — this is the block's value
+};               // y is 4
+```
+
+Put a semicolon after `x + 1` and the block stops producing a value, so `y` becomes `()`. One character decides whether there is a value or not, and tomorrow that same character decides what a function returns.
+
 ## Notes on the day
 
 As a beginner, having only one official path for everything (install, create project, build, run) was helpful. There were no tool choices to make, so I could spend all my attention on the language itself.
 
 The compiler error messages are detailed. They say what is wrong, where, and often how to fix it. I plan to use "write something wrong on purpose and read the error" as a regular way to learn.
 
-Tomorrow: variables — constants, statics, mutability, shadowing, and references.
-
+Tomorrow: return values, `if` as an expression, loops and loop labels — and the loop that quietly eats your data.
