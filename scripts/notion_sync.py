@@ -481,10 +481,127 @@ def cmd_diff():
         print("与上次拉取相比没有变化。")
 
 
-# ------------------------------------------------------------------- audit
+# ------------------------------------------------- render(现场记录 → Notion)
 
 RUST_LEARN = os.path.expanduser(os.environ.get("RUST_LEARN_DIR", "~/rust_learn"))
 BLOG_POSTS = "src/content/posts/rust"
+
+SECTION_RE = re.compile(r"^\s*//\s*-{4,}\s*(.*?)\s*-{4,}\s*$")
+
+
+def _dedent(lines):
+    body = [l for l in lines if l.strip()]
+    if not body:
+        return lines
+    pad = min(len(l) - len(l.lstrip()) for l in body)
+    return [l[pad:] if l.strip() else "" for l in lines]
+
+
+def parse_live_notes(src):
+    """把现场记录的 main.rs 拆成 {narrative, sections}。
+
+    约定(new_day.sh 生成的骨架就是这个形状):
+      //!  开头的模块文档 → 当天的导语
+      // ---------- N. 标题 ----------  → 一个小节的开始
+      小节里:第一行代码之前的整行注释算散文,之后的全部算代码(含行内注释)
+
+    这样划分是因为代码前的注释通常是「老师说 / 我的理解」,而穿插在代码里的注释是
+    在解释那几行代码本身 —— 把后者留在围栏里,读起来才连贯。
+    """
+    lines = src.split("\n")
+
+    narrative, i = [], 0
+    while i < len(lines) and (lines[i].startswith("//!") or not lines[i].strip()):
+        if lines[i].startswith("//!"):
+            narrative.append(lines[i][3:].strip())
+        elif narrative:
+            break
+        i += 1
+
+    sections, cur = [], None
+    for line in lines[i:]:
+        m = SECTION_RE.match(line)
+        if m:
+            cur = {"title": m.group(1).strip(), "prose": [], "code": []}
+            sections.append(cur)
+            continue
+        if cur is None:
+            continue
+        stripped = line.strip()
+        # 整行注释 + 还没出现过代码 → 散文
+        if stripped.startswith("//") and not cur["code"]:
+            cur["prose"].append(stripped.lstrip("/").strip())
+        elif stripped or cur["code"]:
+            cur["code"].append(line)
+
+    for s in sections:
+        while s["code"] and not s["code"][-1].strip():
+            s["code"].pop()
+        # 最后一节会把 fn main 的收尾 } 吃进来。不能无条件删最后一行 ——
+        # 那一行也可能是某个辅助函数自己的闭合括号。用大括号配平来判断:
+        # 只有当 } 比 { 多出一个时,末尾那个才是 main 的。
+        code_only = re.sub(r"//.*", "", "\n".join(s["code"]))
+        if code_only.count("}") - code_only.count("{") == 1:
+            for i in range(len(s["code"]) - 1, -1, -1):
+                if s["code"][i].rstrip() == "}":
+                    del s["code"][i]
+                    break
+            while s["code"] and not s["code"][-1].strip():
+                s["code"].pop()
+        s["code"] = _dedent(s["code"])
+        # 骨架里的「老师说:」「我的理解:」冒号后没东西 = 还没写,不是内容
+        s["prose"] = [p for p in s["prose"] if p and not re.fullmatch(r".{0,6}[:：]", p)]
+
+    return {"narrative": [n for n in narrative if n], "sections": sections}
+
+
+def render_day(day, title=None):
+    """dayN 的现场记录 → 要推进 Notion 的 markdown。
+
+    两条硬规则(见 PIPELINE.md):不放练习、不放 🌟 分级;一个大标题,底下逐条列重点。
+    中英文原样保留 —— 英文承载参考文本,中文承载他自己的理解,都不改写。
+    """
+    d, why = _day_dir(1, day)
+    if why:
+        raise SystemExit(f"❌ {why}")
+    if not d or not d["crates"]:
+        raise SystemExit(f"❌ 没找到 {RUST_LEARN}/day{day}/*/Cargo.toml")
+
+    out = []
+    for crate in d["crates"]:
+        main_rs = os.path.join(crate, "src", "main.rs")
+        if not os.path.exists(main_rs):
+            continue
+        with open(main_rs) as f:
+            parsed = parse_live_notes(f.read())
+
+        head = title or (parsed["narrative"][0] if parsed["narrative"] else f"Day {day}")
+        head = re.sub(r"^Day\s*\d+\s*[—–-]\s*", "", head).strip() or f"Day {day}"
+        out.append(f"# {head}")
+
+        rest = [n for n in parsed["narrative"][1:] if n]
+        if rest:
+            out += ["", *[f"> {n}" for n in rest]]
+
+        idx = 0
+        for s in parsed["sections"]:
+            label = re.sub(r"^\d+\.\s*", "", s["title"] or "").strip()
+            body = " ".join(s["prose"])
+            # 空节(标题、散文、代码都没有)是还没写的骨架,不推半成品进 Notion
+            if not label and not body and not s["code"]:
+                continue
+            idx += 1
+            out += ["", f"**{idx}. {label or '(未命名)'}**" + (f" — {body}" if body else "")]
+            if s["code"]:
+                out += ["", "```rust", *s["code"], "```"]
+
+        if idx == 0:
+            raise SystemExit(f"❌ day{day} 的 main.rs 还是空骨架,没有可推送的内容")
+
+    return "\n".join(out).strip() + "\n"
+
+
+# ------------------------------------------------------------------- audit
 
 
 def _headings(md_text, skip_first=False):
@@ -517,66 +634,96 @@ def _day_dir(chapter, day):
     return {"base": base, "crates": [os.path.dirname(h) for h in hits]}, None
 
 
-def _audit_one(m):
-    ch, day = m.get("chapter"), m["day"]
-    print(f"\nC{ch} · Day {day} — {m['title']}")
+def _cargo(crate, *args, label=""):
+    """真的编译一次。文件存在不等于能跑 —— 这是「原样可编译」唯一可靠的检查方式。"""
+    try:
+        r = subprocess.run(["cargo", "build", "--quiet", *args],
+                           cwd=crate, capture_output=True, text=True, timeout=300)
+        if r.returncode == 0:
+            return "✅", "编译通过"
+        errs = len(re.findall(r"^error", r.stderr, re.M))
+        first = next((l for l in r.stderr.splitlines() if l.startswith("error")), "")
+        return "⚠️", f"**编译失败**({errs} 个错误) {first[:70]}"
+    except FileNotFoundError:
+        return "⚠️", "本机没有 cargo,无法验证"
+    except subprocess.TimeoutExpired:
+        return "⚠️", "编译超时(>300s)"
 
-    # --- Notion ---------------------------------------------------------
-    cache_md = os.path.join(CACHE, f"{m['slug']}.md")
-    with open(cache_md) as f:
-        notion_md = f.read()
-    n_heads = _headings(notion_md, skip_first=True)
-    print(f"  Notion    ✅  {m['chars']} 字符, {m.get('blocks','?')} blocks, {len(n_heads)} 个小节")
 
-    # --- rust_learn ------------------------------------------------------
-    d, why = _day_dir(ch, day)
+def _audit_one(day):
+    """以 dayN 的现场记录为参照,逐项查下游跟上了没有。
+
+    方向很重要:源头是 rust_learn/dayN/<crate>/src/main.rs(他看视频时写的),
+    Notion / NOTES / blog 都是它的下游产物。
+    """
+    d, why = _day_dir(1, day)
     if why:
-        print(f"  NOTES.md  ⚠️  {why}")
-        print(f"  practice  ⚠️  同上")
-    elif not d:
-        print(f"  NOTES.md  ❌  {RUST_LEARN}/day{day}/ 不存在")
-        print(f"  practice  ❌  同上")
+        print(f"\nDay {day}\n  ⚠️  {why}")
+        return
+    if not d or not d["crates"]:
+        print(f"\nDay {day}\n  ❌  {RUST_LEARN}/day{day}/ 不存在或没有 crate")
+        return
+
+    crate = d["crates"][0]
+    topic = os.path.basename(crate)
+    print(f"\nDay {day} — {topic}")
+
+    # --- 源头:现场记录 ----------------------------------------------------
+    main_rs = os.path.join(crate, "src", "main.rs")
+    src_heads = []
+    if os.path.exists(main_rs):
+        with open(main_rs) as f:
+            parsed = parse_live_notes(f.read())
+        src_heads = [s["title"] for s in parsed["sections"] if s["title"] or s["code"]]
+        mark, msg = _cargo(crate)
+        filled = [s for s in parsed["sections"] if s["code"] or s["prose"]]
+        print(f"  main.rs   {mark}  {len(parsed['sections'])} 个编号节"
+              f"({len(filled)} 个已写内容) — {msg}")
+        if not filled:
+            print(f"            └─ 还是空骨架,今天的内容还没记")
+        rel = os.path.relpath(main_rs, RUST_LEARN)
+        if _git_tracked(RUST_LEARN, rel) is False:
+            print(f"            └─ ⚠️ 未被 git 追踪(存在但没提交)")
     else:
-        notes = os.path.join(d["base"], "NOTES.md")
-        if os.path.exists(notes):
-            with open(notes) as f:
-                nh = _headings(f.read(), skip_first=True)
-            print(f"  NOTES.md  ✅  day{day}/NOTES.md — {len(nh)} 个小节")
-            # 两边标题字面对不上(中英夹杂 + 改写),做相似度匹配只会给出虚假的精确感。
-            # 并排列出,由人判断,不输出覆盖率百分比。
-            print(f"            Notion: {' / '.join(h[:22] for h in n_heads[:6])}"
-                  + (" …" if len(n_heads) > 6 else ""))
-            print(f"            NOTES : {' / '.join(h[:22] for h in nh[:6])}"
-                  + (" …" if len(nh) > 6 else ""))
-            print(f"            ↑ 覆盖与否需人工判断(标题不同源,不做自动匹配)")
-        else:
-            print(f"  NOTES.md  ❌  day{day}/NOTES.md 不存在")
+        print(f"  main.rs   ❌  {os.path.relpath(main_rs, RUST_LEARN)} 不存在")
 
-        prac = [os.path.join(c, "examples", "practice.rs") for c in d["crates"]]
-        prac = [p for p in prac if os.path.exists(p)]
-        if not prac:
-            print(f"  practice  ❌  day{day}/*/examples/practice.rs 不存在")
-        for p in prac:
-            crate = os.path.dirname(os.path.dirname(p))
-            rel = os.path.relpath(p, RUST_LEARN)
-            try:
-                r = subprocess.run(["cargo", "build", "--example", "practice", "--quiet"],
-                                   cwd=crate, capture_output=True, text=True, timeout=300)
-                errs = len(re.findall(r"^error", r.stderr, re.M))
-                if r.returncode == 0:
-                    print(f"  practice  ✅  {rel} — 原样编译通过")
-                else:
-                    print(f"  practice  ⚠️  {rel} — **编译失败**({errs} 个错误)")
-                    first = next((l for l in r.stderr.splitlines() if l.startswith("error")), "")
-                    print(f"            {first[:88]}")
-            except FileNotFoundError:
-                print(f"  practice  ⚠️  {rel} 存在,但本机没有 cargo,无法验证")
-            except subprocess.TimeoutExpired:
-                print(f"  practice  ⚠️  {rel} — 编译超时(>300s)")
-            if _git_tracked(RUST_LEARN, rel) is False:
-                print(f"            └─ ⚠️ 该文件未被 git 追踪(存在但没提交)")
+    # --- practice ---------------------------------------------------------
+    prac = os.path.join(crate, "examples", "practice.rs")
+    if not os.path.exists(prac):
+        print(f"  practice  ❌  day{day}/{topic}/examples/practice.rs 不存在")
+    else:
+        with open(prac) as f:
+            body = f.read()
+        n_ex = len(re.findall(r"Exercise\s+\d+", body))
+        mark, msg = _cargo(crate, "--example", "practice")
+        todo = "(还是 TODO 骨架)" if "Exercise 1: TODO" in body else ""
+        print(f"  practice  {mark}  {n_ex} 题{todo} — {msg}")
 
-    # --- blog ------------------------------------------------------------
+    # --- Notion(中介层,不再是权威)---------------------------------------
+    page = _find_day(day)
+    if not page:
+        print(f"  Notion    ❌  System III 下没有 Day {day} 页(或缓存过期,先 fetch)")
+    else:
+        n_heads = _headings(open(os.path.join(CACHE, f"{page['slug']}.md")).read(), skip_first=True)
+        print(f"  Notion    ✅  {page['title']} — {page['chars']} 字符, {len(n_heads)} 个小节")
+        if src_heads:
+            # 不做相似度匹配 —— 两边标题不同源,自动匹配只会给出虚假的精确感。
+            print(f"            源头: {' / '.join(h[:20] for h in src_heads[:5])}"
+                  + (" …" if len(src_heads) > 5 else ""))
+            print(f"            Notion: {' / '.join(h[:20] for h in n_heads[:5])}"
+                  + (" …" if len(n_heads) > 5 else ""))
+            print(f"            ↑ 是否同步需人工判断(不做自动匹配)")
+
+    # --- NOTES.md ---------------------------------------------------------
+    notes = os.path.join(d["base"], "NOTES.md")
+    if os.path.exists(notes):
+        with open(notes) as f:
+            nh = _headings(f.read(), skip_first=True)
+        print(f"  NOTES.md  ✅  day{day}/NOTES.md — {len(nh)} 个小节")
+    else:
+        print(f"  NOTES.md  ❌  day{day}/NOTES.md 不存在")
+
+    # --- blog -------------------------------------------------------------
     posts = sorted(glob.glob(os.path.join(BLOG_POSTS, f"day-{day}-*.md*")))
     if not posts:
         print(f"  blog      ❌  {BLOG_POSTS}/day-{day}-*.mdx 不存在")
@@ -584,22 +731,24 @@ def _audit_one(m):
         with open(p) as f:
             head = f.read(600)
         draft = re.search(r"^draft:\s*true", head, re.M)
-        mark = "⚠️" if draft else "✅"
-        print(f"  blog      {mark}  {os.path.basename(p)}"
+        print(f"  blog      {'⚠️' if draft else '✅'}  {os.path.basename(p)}"
               + ("  — 仍是草稿(draft: true),未上线" if draft else ""))
 
 
 def cmd_audit(arg=None):
-    days = sorted(_day_pages(), key=lambda m: (m.get("chapter") or 0, m["day"]))
+    # 以文件系统为准枚举天数 —— 源头是 dayN 目录,不是 Notion
+    days = sorted(int(m.group(1))
+                  for m in (re.match(r"day(\d+)$", os.path.basename(p))
+                            for p in glob.glob(os.path.join(RUST_LEARN, "day*")))
+                  if m)
     if not days:
-        raise SystemExit("❌ 缓存里没有日页,先跑 fetch")
+        raise SystemExit(f"❌ {RUST_LEARN} 下没有 dayN 目录")
 
     if arg:
-        day, chapter = _parse_day_arg(arg)
-        m = _find_day(day, chapter)
-        if not m:
-            raise SystemExit(f"❌ 缓存里没有这一天")
-        days = [m]
+        day, _chapter = _parse_day_arg(arg)
+        if day not in days:
+            raise SystemExit(f"❌ 没有 day{day}/。已有: {days}")
+        days = [day]
 
     for m in days:
         _audit_one(m)
@@ -609,6 +758,8 @@ def cmd_audit(arg=None):
     if root and not arg:
         with open(os.path.join(CACHE, f"{root['slug']}.md")) as f:
             heads = _headings(f.read(), skip_first=True)
+        # 章标题是父页的结构,不是没人认领的内容 —— 它本来就该待在那儿
+        heads = [h for h in heads if not CHAPTER_RE.search(h)]
         if heads:
             print(f"\n⚠️  父页正文里还有 {len(heads)} 个小节没有被任何一天认领:")
             for h in heads[:12]:
@@ -639,6 +790,10 @@ def main():
         if args and not re.fullmatch(r"\d+(\.\d+)?", args[0]):
             raise SystemExit("❌ 用法: notion.sh audit [N]  或  audit <章>.<N>")
         cmd_audit(args[0] if args else None)
+    elif cmd == "render":
+        if not args or not args[0].isdigit():
+            raise SystemExit("❌ 用法: notion.sh render <N>")
+        sys.stdout.write(render_day(int(args[0])))
     else:
         raise SystemExit(f"❌ 未知命令: {cmd or '(空)'}")
 

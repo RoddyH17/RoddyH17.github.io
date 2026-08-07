@@ -6,7 +6,8 @@
 #   ./scripts/notion.sh fetch [--force]   # 拉取全部页面 → .cache/notion/
 #   ./scripts/notion.sh day <N>           # 打印 Day N 那页的 markdown
 #   ./scripts/notion.sh diff              # 与上次拉取相比,哪些标题增删了
-#   ./scripts/notion.sh audit [N]         # 四层对账:Notion / NOTES.md / practice / blog
+#   ./scripts/notion.sh audit [N]         # 对账:以 dayN 现场记录为参照,查下游跟上没
+#   ./scripts/notion.sh render <N>        # 把 dayN 的 main.rs 渲染成待推 Notion 的 markdown
 #
 # 日号只在章内唯一(Chapter 2 会重新从 Day 1 开始),跨章重号时写成 <章>.<日>,
 # 例如 `day 2.3` = 第 2 章的 Day 3。第 1 章可以省略,直接 `day 3`。
@@ -41,15 +42,15 @@ export NOTION_CACHE_DIR="${NOTION_CACHE_DIR:-.cache/notion}"
 
 cmd="${1:-}"
 case "$cmd" in
-  list | fetch | day | diff | audit)
+  list | fetch | day | diff | audit | render)
     exec python3 scripts/notion_sync.py "$@"
     ;;
   "")
-    sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
     exit 1
     ;;
   *)
-    echo "❌ 未知命令: $cmd (可用: list / fetch / day / diff / audit)"
+    echo "❌ 未知命令: $cmd (可用: list / fetch / day / diff / audit / render)"
     exit 1
     ;;
 esac

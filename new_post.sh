@@ -1,8 +1,8 @@
 #!/bin/bash
 # 新建一篇博客草稿(按类别归入 src/content/posts/<category>/ 文件夹)
 # 用法: ./new_post.sh <category> <slug> ["标题"]
-# 例:  ./new_post.sh rust_learn day-3-structs "Day 3 · 结构体"
-#      ./new_post.sh crypto_map dune-sql-notes "Dune SQL 笔记"
+# 例:  ./new_post.sh rust day-4-slice-char-enum "Day 4 · 切片、字符与枚举"
+#      ./new_post.sh crypto dune-sql-notes "Dune SQL 笔记"
 # 类别文件夹不存在会自动创建;分类页/归档页自动更新
 # 生成的文章默认 draft: true(不上线),写完把这行删掉再 sync 即发布
 set -e
@@ -11,9 +11,9 @@ cd "$(dirname "$0")"
 category="${1:?用法: ./new_post.sh <category> <slug> [\"标题\"]}"
 slug="${2:?用法: ./new_post.sh <category> <slug> [\"标题\"]}"
 title="${3:-$slug}"
-file="src/content/posts/${category}/${slug}.md"
+file="src/content/posts/${category}/${slug}.mdx"
 
-if [ -e "$file" ] || [ -e "${file}x" ]; then
+if [ -e "$file" ] || [ -e "${file%x}" ]; then
   echo "❌ $file 已存在"
   exit 1
 fi
@@ -25,6 +25,7 @@ cat > "$file" <<EOF
 title: "$title"
 pubDate: "$(date +%Y-%m-%d)"
 author: "Roddy"
+# modDate: "$(date +%Y-%m-%d)"   # 改过再取消注释
 description: "TODO: one-line summary"
 # mood: [zen]   # tags: zen = calm | sorge = frustrated | frage = unresolved question
 categories: ['$category']
