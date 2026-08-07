@@ -732,7 +732,9 @@ def _audit_one(day):
     else:
         with open(prac) as f:
             body = f.read()
-        n_ex = len(re.findall(r"Exercise\s+\d+", body))
+        # 数**不重复的**题号 —— 正文和注释里会多次引用同一题(如「Exercise 3(b)」、
+        # 「Exercise 7 / 8」),按出现次数数会虚高
+        n_ex = len(set(re.findall(r"Exercise\s+(\d+)", body)))
         mark, msg = _cargo(crate, "--example", "practice")
         todo = "(还是 TODO 骨架)" if "Exercise 1: TODO" in body else ""
         print(f"  practice  {mark}  {n_ex} 题{todo} — {msg}")

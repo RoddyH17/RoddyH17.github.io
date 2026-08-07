@@ -1,0 +1,200 @@
+---
+title: "Day 4 · Arrays and Slices — Length in the Type, and a Borrow Into the Middle"
+pubDate: "2026-08-07"
+author: "Roddy"
+description: "An array's length is part of its type, which is why passing one to a function copies it. A slice is a borrow of a range — no ownership, so Day 3's rules apply unchanged. Plus why a string index can panic and a slice reference is 16 bytes."
+categories: ['rust']
+---
+
+# Day 4 · Arrays and Slices
+
+Day 3 was about who owns a value. Today is about two things built directly on top of that: arrays, where **the length is part of the type**, and slices, which are **a borrow of part of a collection** — no ownership, so yesterday's borrowing rules apply without a single change.
+
+> Today's code: [`day4/arr_slice_enum/`](https://github.com/RoddyH17/rust_learn/tree/main/day4/arr_slice_enum) · Notes and rubric: [`day4/NOTES.md`](https://github.com/RoddyH17/rust_learn/blob/main/day4/NOTES.md)
+
+## The length is part of the type
+
+```rust
+let arr: [i32; 4] = [10, 20, 30, 40];
+let arr1: [i32; 4] = [10; 4];   // four elements, all 10
+```
+
+The `4` in `[i32; 4]` is not a property of the value, it is part of the **type**. `[i32; 3]` and `[i32; 4]` are different types, and one will not go where the other is expected. That is what lets an array live on the stack: the compiler knows exactly how many bytes to reserve.
+
+An array cannot change length. You can update elements, but never push or remove. When you need that, you want a `Vec`, whose contents live on the heap.
+
+## Three ways to walk it, and one that does not parse
+
+```rust
+for index in 0..4 {
+    println!("arr[{}] = {}", index, arr[index]);
+}
+
+for value in arr.iter() { }                              // &i32
+
+arr.iter().for_each(|value: &i32| println!("{}", value)); // closure
+```
+
+I first wrote the index version as `for index: i32 in 0..4` and it would not compile. The reason turned out not to be a typo: **`for` takes a pattern, not a variable declaration**, so there is no `: type` slot in that position at all. If you want to pin the type, put it on the range — `0..4i32`.
+
+## Passing an array to a function copies it
+
+```rust
+let a: [i32; 3] = [10, 20, 30];
+update(a);
+println!("{:?}", a);   // still [10, 20, 30]
+```
+
+`update` sets every element to zero and prints the result, and the caller's array comes out untouched. `i32` is `Copy`, so `[i32; 3]` is `Copy` too, and the function received a duplicate.
+
+Change the element type and the behaviour inverts:
+
+```rust
+let strs: [String; 2] = [String::from("a"), String::from("b")];
+takes_string_array(strs);
+println!("{:?}", strs);   // does not compile — strs was moved
+```
+
+`String` is not `Copy`, so the array is not either. **Same syntax, opposite outcome, and the only thing that decides it is the element type** — exactly the pattern from Day 2's loop that ate its data.
+
+To actually modify the caller's array, borrow it mutably:
+
+```rust
+fn update_mut(arr: &mut [i32; 3]) { /* ... */ }
+```
+
+## The problem slices exist to solve
+
+Suppose you want the end of the first word in a string. Without slices you return an index:
+
+```rust
+fn first_word_index(s: &String) -> usize { /* ... */ }
+
+let mut s = String::from("hello world");
+let word_end = first_word_index(&s);   // 5
+s.clear();                             // s is now ""
+// word_end is still 5, and now means nothing
+```
+
+The `usize` is a plain number, completely detached from `s`. Nothing keeps them consistent, and nothing warns you when they drift apart. Return a slice instead and the return value **is a borrow of `s`**:
+
+```rust
+fn first_word(s: &str) -> &str { /* ... */ }
+
+let mut s = String::from("hello world");
+let word = first_word(&s);
+s.clear();                             // error!
+println!("the first word is: {word}");
+```
+
+`cannot borrow s as mutable because it is also borrowed as immutable.` The bug that used to be a silent logic error is now a build failure — and notice that this is not a new rule. It is Day 3's borrowing rule, unchanged, applied to a slice. **A slice is a reference; it has no ownership.** Everything that was true of `&T` yesterday is true of it today.
+
+## Ranges are half-open, and the ends can be dropped
+
+```rust
+let s = String::from("hello world");
+let hello = &s[0..5];    // bytes 0,1,2,3,4
+let world = &s[6..11];
+```
+
+When the start is 0 or the end is the length, that side can be omitted: `&s[..2]`, `&s[3..]`, `&s[..]`.
+
+## Where `char` and `String` part ways
+
+This is the piece I had not seen coming.
+
+- A `char` is a Unicode scalar value and is **always 4 bytes** — `size_of::<char>() == 4`
+- A `String` is **UTF-8**, where one character takes **1 to 4 bytes** depending on what it is
+
+So the two do not line up, and `len()` is counting bytes:
+
+```rust
+let cn = String::from("你好");
+cn.len()            // 6  — bytes
+cn.chars().count()  // 2  — characters
+&cn[0..3]           // "你"
+&cn[0..2]           // panics at runtime
+```
+
+A slice index that lands in the middle of a character is not a compile error and not a silently wrong answer — it is a runtime panic. This is also why Rust refuses to let you write `s[0]` to get "the first character": there is no cheap answer to that question in a variable-width encoding.
+
+## A string literal and a `String` are not the same thing
+
+| | `"hello"` | `String::from("hello")` |
+|---|---|---|
+| Type | `&'static str` | `String` |
+| Bytes live in | Read-only section of the binary | Heap |
+| Owns the data | No | Yes |
+
+A literal is hardcoded into the executable at compile time, and what you hold is a reference that does not own it. That is not a limitation — most of the time you do not need ownership of a string, you only need to read it.
+
+Converting `&String` into `&str` is free, and there are three ways to write it:
+
+```rust
+say_hello(&s);           // deref coercion does it for you
+say_hello(&s[..]);       // slicing the whole thing
+say_hello(s.as_str());   // ask for it directly
+```
+
+Going the other way costs an allocation, because the bytes have to be copied onto the heap.
+
+And when concatenating, the two forms differ in more than syntax:
+
+```rust
+let result = s1 + &s2;               // s1 is MOVED — you cannot use it afterwards
+let s3 = format!("{}, {}", a, b);    // borrows both, moves nothing
+```
+
+## Which is why functions should take `&str`
+
+```rust
+fn first_word(s: &str) -> &str
+```
+
+With `&str` in the signature, all four of these work — a sub-slice, a whole-string slice, a `&String` (deref coercion again), and a plain literal:
+
+```rust
+first_word(&owned[0..6]);
+first_word(&owned[..]);
+first_word(&owned);
+first_word("hello world");
+```
+
+Write `&String` instead and the literal is locked out. Same rule for collections: prefer `&[T]` over `&Vec<T>`. More general, and it costs nothing.
+
+## A slice reference is 16 bytes
+
+```rust
+let chars: [char; 3] = ['中', '国', '人'];
+let slice = &chars[..2];
+size_of_val(&slice)   // 16, not 8
+```
+
+A plain reference is one word — just an address. A slice reference is **two**: a pointer to the first element *and* a length. Hence "fat pointer", and hence the fixed 16 bytes on a 64-bit machine no matter how many elements it covers.
+
+That length is also the answer to why three related types exist:
+
+| Type | Signature | Length known when |
+|---|---|---|
+| Array | `[T; N]` | Compile time, part of the type |
+| Slice | `[T]` | Runtime → a DST, **cannot be used bare** |
+| Slice reference | `&[T]` | Runtime, carried in the fat pointer |
+
+```rust
+let bad: [i32] = arr[0..2];    // doesn't have a size known at compile-time
+let ok: &[i32] = &arr[0..2];   // fine — the length rides along in the pointer
+```
+
+`[T]` on its own has no size the compiler can plan for, so it can only be reached through a reference. The `&` is not decoration; it is what carries the length.
+
+## Practice
+
+Ten exercises in [`examples/practice.rs`](https://github.com/RoddyH17/rust_learn/blob/main/day4/arr_slice_enum/examples/practice.rs), runnable with `cargo run --example practice`, graded 🌟 warm-up / 🌟🌟 the one that teaches something / 🌟🌟🌟 challenge.
+
+**1–5, arrays** — fix a length/type mismatch with one edit, predict which loop iteration panics on an out-of-bounds index, work out why `[i32; 3]` survives a function call and `[String; 2]` does not, make a function actually modify its caller's array, and rewrite a range without using the digit `0`.
+
+**6–10, slices** — answer three questions about `"你好"` before letting it panic, fix a borrow-checker error by reordering statements only, count how many of four call sites compile against `&str` (and how that changes for `&String`), measure a fat pointer against a plain `&char`, and finally repair two DST errors by adding characters only.
+
+The self-check rubric is in the [notes](https://github.com/RoddyH17/rust_learn/blob/main/day4/NOTES.md). The one worth answering out loud: if a slice is just a reference, what did Day 3 already tell you about what you can and cannot do with it?
+
+Tomorrow: enums, `match`, and `Option`.
