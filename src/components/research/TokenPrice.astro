@@ -1,0 +1,115 @@
+---
+// Live token price, resolved in the browser rather than at build time.
+//
+// This site builds to static files and deploys to Pages. A price fetched during
+// the build would be frozen at deploy time and quietly wrong forever, so the
+// number is fetched at view time instead. Source is DefiLlama's keyless price
+// API — no key, no account, CORS open.
+//
+// Every instance on the page is filled by one batched request; Astro hoists and
+// dedupes this component's script, so the code below runs once no matter how
+// many prices are rendered.
+interface Props {
+  id: string
+  symbol: string
+}
+
+const { id, symbol } = Astro.props
+---
+
+<div class="token-price" data-token={id}>
+  <span class="op-60 text-3.25 tracking-wide uppercase">{symbol}</span>
+  <div flex="~ gap-2 items-baseline">
+    <span class="text-6 font-bold lh-tight" data-price>&mdash;</span>
+    <span class="text-3.5" data-change></span>
+  </div>
+  <span class="op-45 text-3">spot price via DefiLlama</span>
+</div>
+
+<style>
+  .token-price {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+  [data-change][data-dir='up'] {
+    color: #2f8f5b;
+  }
+  [data-change][data-dir='down'] {
+    color: #c0492f;
+  }
+  :global(html.dark) [data-change][data-dir='up'] {
+    color: #6fca97;
+  }
+  :global(html.dark) [data-change][data-dir='down'] {
+    color: #e2846b;
+  }
+</style>
+
+<script>
+  const API = 'https://coins.llama.fi'
+
+  function fmt(p: number) {
+    const digits = p < 1 ? 4 : 2
+    return `$${p.toLocaleString('en-US', {
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits,
+    })}`
+  }
+
+  async function hydrateTokenPrices() {
+    const nodes = Array.from(document.querySelectorAll<HTMLElement>('[data-token]'))
+    if (nodes.length === 0) {
+      return
+    }
+
+    const ids = [...new Set(nodes.map((n) => n.dataset.token!))]
+    const keys = ids.map((i) => `coingecko:${i}`).join(',')
+
+    const setAll = (text: string) => {
+      for (const n of nodes) {
+        const el = n.querySelector('[data-price]')
+        if (el && el.textContent === '—') {
+          el.textContent = text
+        }
+      }
+    }
+
+    try {
+      const [priceRes, changeRes] = await Promise.all([
+        fetch(`${API}/prices/current/${keys}`),
+        fetch(`${API}/percentage/${keys}?period=1d`),
+      ])
+      const prices = (await priceRes.json())?.coins ?? {}
+      const changes = (await changeRes.json())?.coins ?? {}
+
+      for (const n of nodes) {
+        const key = `coingecko:${n.dataset.token}`
+        const priceEl = n.querySelector<HTMLElement>('[data-price]')
+        const changeEl = n.querySelector<HTMLElement>('[data-change]')
+        const price = prices[key]?.price
+        const change = changes[key]
+
+        if (priceEl) {
+          // An unverified CoinGecko id resolves to nothing rather than to a
+          // wrong number — say so instead of showing a placeholder dash.
+          priceEl.textContent = typeof price === 'number' ? fmt(price) : 'no price feed'
+        }
+        if (changeEl && typeof change === 'number') {
+          changeEl.textContent = `${change >= 0 ? '+' : ''}${change.toFixed(2)}% 24h`
+          changeEl.dataset.dir = change >= 0 ? 'up' : 'down'
+        }
+      }
+    } catch {
+      setAll('price unavailable')
+    }
+  }
+
+  hydrateTokenPrices()
+
+  // Swup swaps <main> without a reload, so this module will not re-execute on
+  // in-site navigation. The listener is registered on document once and
+  // survives those swaps, re-filling whatever the new page rendered.
+  document.addEventListener('swup:page:view', hydrateTokenPrices)
+  document.addEventListener('swup:contentReplaced', hydrateTokenPrices)
+</script>

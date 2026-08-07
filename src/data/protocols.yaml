@@ -1,0 +1,286 @@
+# Protocol registry for the /research section.
+#
+# A research note carries `protocol: "uniswap"` — a bare string with nowhere to
+# hang a logo, a mechanism, or a token. This file is that missing entity.
+# Edit it by hand; nothing here is generated.
+#
+# id         — must match `protocol:` in research frontmatter, and is the URL:
+#              /research/<id>
+# sector     — how the index page groups cards: dex | lending | perps | infra
+# chains     — which track(s) it lives on. Drives the chain tag on each card.
+# status     — active  = has research notes (or is being read right now)
+#              planned = on the roadmap, no notes yet; greyed and unclickable
+# mechanism  — ONE sentence naming the core mechanism, not the ambition. What
+#              the thing runs on, stated so a reader knows what is being taken
+#              apart before reading a single equation. Same sentence is used on
+#              the card and as the lead on the protocol page, so it is written
+#              once and never drifts.
+# token.id   — CoinGecko id, resolved at view time through DefiLlama's keyless
+#              price API. Omit the whole `token` block when a protocol has no
+#              token or the id is unverified — the page renders fine without it.
+# logo       — file under public/logos/, fetched once by scripts/fetch-logos.sh
+
+- id: uniswap
+  name: Uniswap
+  sector: dex
+  chains: [ethereum]
+  status: active
+  logo: /logos/uniswap.webp
+  mechanism: >-
+    Swaps are priced by a closed-form invariant instead of a counterparty —
+    x·y=k in v2, and in v3 that same curve clipped to a chosen tick range so
+    capital sits only where price actually trades.
+  token:
+    symbol: UNI
+    id: uniswap
+  links:
+    site: https://uniswap.org
+    github: https://github.com/Uniswap
+    deepwiki: https://deepwiki.com/Uniswap/v2-core
+
+- id: curve
+  name: Curve
+  sector: dex
+  chains: [ethereum]
+  status: planned
+  logo: /logos/curve.webp
+  mechanism: >-
+    Interpolates between a constant-sum curve (flat, zero slippage) and a
+    constant-product curve (never runs dry) through an amplification
+    coefficient, so the quote stays flat near parity and only degrades as
+    reserves skew.
+  token:
+    symbol: CRV
+    id: curve-dao-token
+  links:
+    site: https://curve.fi
+    github: https://github.com/curvefi
+    deepwiki: https://deepwiki.com/curvefi/curve-contract
+
+- id: balancer
+  name: Balancer
+  sector: dex
+  chains: [ethereum]
+  status: planned
+  logo: /logos/balancer.webp
+  mechanism: >-
+    Generalises x·y=k to a weighted product over n assets, which makes one pool
+    simultaneously an AMM and an index fund that rebalances itself through
+    arbitrage rather than through a manager.
+  token:
+    symbol: BAL
+    id: balancer
+  links:
+    site: https://balancer.fi
+    github: https://github.com/balancer
+    deepwiki: https://deepwiki.com/balancer/balancer-v2-monorepo
+
+- id: raydium
+  name: Raydium
+  sector: dex
+  chains: [solana]
+  status: planned
+  logo: /logos/raydium.webp
+  mechanism: >-
+    Projects AMM pool reserves onto a central limit order book as resting
+    orders, so the same capital quotes in a curve and in a book at the same
+    time.
+  token:
+    symbol: RAY
+    id: raydium
+  links:
+    site: https://raydium.io
+    github: https://github.com/raydium-io
+    deepwiki: https://deepwiki.com/raydium-io/raydium-clmm
+
+- id: orca
+  name: Orca
+  sector: dex
+  chains: [solana]
+  status: planned
+  logo: /logos/orca.webp
+  mechanism: >-
+    Tick-and-range concentrated liquidity re-expressed under Solana's account
+    model, where every tick array a swap crosses must be named by the
+    transaction before it runs.
+  token:
+    symbol: ORCA
+    id: orca
+  links:
+    site: https://orca.so
+    github: https://github.com/orca-so
+    deepwiki: https://deepwiki.com/orca-so/whirlpools
+
+- id: meteora
+  name: Meteora
+  sector: dex
+  chains: [solana]
+  status: planned
+  logo: /logos/meteora.webp
+  mechanism: >-
+    Discretises liquidity into fixed-width price bins instead of a continuous
+    curve, which makes a trade inside one bin exactly zero-slippage and turns
+    fee accrual into per-bin accounting.
+  links:
+    site: https://meteora.ag
+    github: https://github.com/MeteoraAg
+    deepwiki: https://deepwiki.com/MeteoraAg/dlmm-sdk
+
+- id: aave
+  name: Aave
+  sector: lending
+  chains: [ethereum]
+  status: planned
+  logo: /logos/aave.webp
+  mechanism: >-
+    The borrow rate is a deterministic function of pool utilisation rather than
+    a negotiated match, and solvency is a health factor recomputed from oracle
+    prices on every action that touches a position.
+  token:
+    symbol: AAVE
+    id: aave
+  links:
+    site: https://aave.com
+    github: https://github.com/aave
+    deepwiki: https://deepwiki.com/aave/aave-v3-core
+
+- id: compound
+  name: Compound
+  sector: lending
+  chains: [ethereum]
+  status: planned
+  logo: /logos/compound.webp
+  mechanism: >-
+    Interest accrues into the cToken exchange rate rather than into balances, so
+    a single number updates every lender's position at once — the same
+    share-price accounting an LP token uses.
+  token:
+    symbol: COMP
+    id: compound-governance-token
+  links:
+    site: https://compound.finance
+    github: https://github.com/compound-finance
+    deepwiki: https://deepwiki.com/compound-finance/comet
+
+- id: kamino
+  name: Kamino
+  sector: lending
+  chains: [solana]
+  status: planned
+  logo: /logos/kamino.webp
+  mechanism: >-
+    Turns "manage a concentrated liquidity position" into a rebalancing policy
+    executed on-chain, so the choice of range stops being a manual decision and
+    becomes an algorithm that must be stated.
+  links:
+    site: https://kamino.finance
+    github: https://github.com/Kamino-Finance
+    deepwiki: https://deepwiki.com/Kamino-Finance/klend
+
+- id: hyperliquid
+  name: Hyperliquid
+  sector: perps
+  chains: [hyperliquid]
+  status: planned
+  logo: /logos/hyperliquid.webp
+  mechanism: >-
+    Runs a full central limit order book inside consensus rather than
+    approximating one with a curve, which forces matching and margin to be
+    deterministic under block ordering.
+  token:
+    symbol: HYPE
+    id: hyperliquid
+  links:
+    site: https://hyperliquid.xyz
+    github: https://github.com/hyperliquid-dex
+    deepwiki: https://deepwiki.com/hyperliquid-dex/hyperliquid-python-sdk
+
+- id: gmx
+  name: GMX
+  sector: perps
+  chains: [arbitrum]
+  status: planned
+  logo: /logos/gmx.webp
+  mechanism: >-
+    Prices perps off an oracle with a shared pool as the sole counterparty,
+    making LPs structurally short trader PnL and funding fees the control loop
+    that has to keep that solvent.
+  token:
+    symbol: GMX
+    id: gmx
+  links:
+    site: https://gmx.io
+    github: https://github.com/gmx-io
+    deepwiki: https://deepwiki.com/gmx-io/gmx-synthetics
+
+- id: drift
+  name: Drift
+  sector: perps
+  chains: [solana]
+  status: planned
+  logo: /logos/drift.webp
+  mechanism: >-
+    Three liquidity sources quote one market — an order book, a just-in-time
+    auction, and an AMM backstop — under an explicit priority rule that decides
+    which one fills a taker first.
+  token:
+    symbol: DRIFT
+    id: drift-protocol
+  links:
+    site: https://drift.trade
+    github: https://github.com/drift-labs
+    deepwiki: https://deepwiki.com/drift-labs/protocol-v2
+
+- id: ethereum
+  name: Ethereum
+  sector: infra
+  chains: [ethereum]
+  status: planned
+  logo: /logos/ethereum.webp
+  mechanism: >-
+    Gas meters every operation, which makes storage layout, transient storage
+    and the reentrancy surface not implementation details but the cost function
+    every protocol above is written against.
+  token:
+    symbol: ETH
+    id: ethereum
+  links:
+    site: https://ethereum.org
+    github: https://github.com/ethereum
+    deepwiki: https://deepwiki.com/ethereum/go-ethereum
+
+- id: solana
+  name: Solana
+  sector: infra
+  chains: [solana]
+  status: planned
+  logo: /logos/solana.webp
+  mechanism: >-
+    A transaction declares the accounts it will read and write before it runs,
+    so parallelism is a scheduling consequence and every AMM must externalise
+    its state into accounts the caller names in advance.
+  token:
+    symbol: SOL
+    id: solana
+  links:
+    site: https://solana.com
+    github: https://github.com/anza-xyz/agave
+    deepwiki: https://deepwiki.com/anza-xyz/agave
+
+- id: arbitrum
+  name: Arbitrum
+  sector: infra
+  chains: [ethereum]
+  status: planned
+  logo: /logos/arbitrum.webp
+  mechanism: >-
+    Executes off-chain and settles optimistically behind a fraud-proof window,
+    shifting the gas schedule enough that AMM designs uneconomical on L1 become
+    viable.
+  token:
+    symbol: ARB
+    id: arbitrum
+  links:
+    site: https://arbitrum.io
+    github: https://github.com/OffchainLabs
+    deepwiki: https://deepwiki.com/OffchainLabs/nitro

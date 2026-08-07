@@ -1,0 +1,184 @@
+---
+// Research note detail.
+//
+// Header order is deliberate: title, then when/which revision/what kind, then
+// the goal — a reader needs to know what this note is *for* before the first
+// equation. Maturity signals (status, confidence, mechanisms) sit below in
+// smaller type; they qualify the claims, they are not the headline.
+//
+// Provenance (code anchors + the DeepWiki query trail) is rendered from
+// frontmatter rather than written into the body, so it stays machine-checkable
+// and cannot drift out of sync with the prose.
+import type { GetStaticPaths, InferGetStaticPropsType } from 'astro'
+import { render } from 'astro:content'
+import SiteSeo from '~/components/SiteSeo.astro'
+import LayoutDefault from '~/layouts/LayoutDefault.astro'
+import { CATEGORY_LABEL, formatDate, getProtocol, getResearch } from '~/utils'
+
+export const getStaticPaths = (async () => {
+  const notes = await getResearch()
+
+  return Promise.all(
+    notes.map(async (note) => {
+      const [protocol, ...rest] = note.id.split('/')
+      return {
+        params: { protocol, slug: rest.join('/') },
+        props: { entry: note, protocol: await getProtocol(protocol) },
+      }
+    }),
+  )
+}) satisfies GetStaticPaths
+
+type Props = InferGetStaticPropsType<typeof getStaticPaths>
+
+const { entry, protocol } = Astro.props
+const { Content } = await render(entry)
+const d = entry.data
+
+function anchorUrl(s: { repo: string, commit?: string, path?: string, lines?: string }) {
+  if (!s.path) return `https://github.com/${s.repo}`
+  const ref = s.commit ?? 'HEAD'
+  const hash = s.lines ? `#L${s.lines.replace('-', '-L')}` : ''
+  return `https://github.com/${s.repo}/blob/${ref}/${s.path}${hash}`
+}
+---
+
+<LayoutDefault>
+  <SiteSeo slot="seo" title={d.title} desc={d.description ?? d.goal} />
+
+  <article class="prose">
+    <a href={`/research/${d.protocol}`} class="op-55 text-3.5">
+      &larr; {protocol?.data.name ?? d.protocol}
+    </a>
+
+    <header class="note-head">
+      <h1 class="note-title">{d.title}</h1>
+
+      <p class="meta-strip">
+        <span>{formatDate(d.pubDate)}</span>
+        <span>Revision {d.revision}</span>
+        <span>{CATEGORY_LABEL[d.category] ?? d.category}</span>
+        {d.version && <span>{protocol?.data.name ?? d.protocol} {d.version}</span>}
+        {d.draft && <span class="draft-tag">draft</span>}
+      </p>
+
+      {
+        d.goal && (
+          <div class="goal-block">
+            <p class="op-50 text-3 tracking-wide uppercase m-0">Goal</p>
+            <p class="text-4.5 lh-relaxed m-0 mt-2">{d.goal}</p>
+          </div>
+        )
+      }
+
+      <p class="op-50 text-3.25 mt-4 mb-0">
+        {d.status} · confidence {d.confidence}/5
+        {d.modDate && ` · updated ${formatDate(d.modDate)}`}
+        {d.mechanisms.length > 0 && ` · ${d.mechanisms.join(', ')}`}
+      </p>
+    </header>
+
+    <Content />
+
+    {
+      d.sources.length > 0 && (
+        <section>
+          <h2>Code anchors</h2>
+          <p class="op-70 text-3.5">
+            Pinned to a commit. If a claim below cannot be traced to one of these, it is not yet a
+            finding.
+          </p>
+          <ul>
+            {d.sources.map(s => (
+              <li>
+                <a href={anchorUrl(s)} target="_blank" rel="noopener">
+                  <code>
+                    {s.repo}
+                    {s.path ? `/${s.path}` : ''}
+                    {s.lines ? `#L${s.lines}` : ''}
+                  </code>
+                </a>
+                {s.commit && <span class="op-60 text-3.5"> @ {s.commit.slice(0, 7)}</span>}
+                {s.note && <span class="op-80"> — {s.note}</span>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )
+    }
+
+    {
+      d.deepwiki.length > 0 && (
+        <section>
+          <h2>DeepWiki query trail</h2>
+          <p class="op-70 text-3.5">
+            How this note was researched. Retrieval only — every conclusion drawn from these was
+            re-checked against the pinned source above.
+          </p>
+          <ul>
+            {d.deepwiki.map(q => (
+              <li>
+                <a href={q.url} target="_blank" rel="noopener">
+                  {q.repo}
+                </a>
+                {q.date && <span class="op-60 text-3.5"> · {q.date}</span>}
+                <p class="op-80 text-3.5 m-0">{q.question}</p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )
+    }
+
+    {
+      d.open.length > 0 && (
+        <section>
+          <h2>Open questions</h2>
+          <ul>{d.open.map(q => <li>{q}</li>)}</ul>
+        </section>
+      )
+    }
+  </article>
+</LayoutDefault>
+
+<style>
+  .note-head {
+    margin: 1.25rem 0 2.5rem;
+  }
+
+  .note-title {
+    font-size: 2.1rem;
+    line-height: 1.15;
+    font-weight: 700;
+    margin: 0;
+  }
+
+  .meta-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 0.9rem;
+    margin: 0.75rem 0 0;
+    font-size: 0.9rem;
+    opacity: 0.7;
+  }
+
+  /* Separators between items, but not a trailing one on a wrapped row. */
+  .meta-strip > span + span::before {
+    content: '·';
+    margin-right: 0.9rem;
+    opacity: 0.5;
+  }
+
+  .draft-tag {
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-size: 0.75rem;
+    align-self: center;
+  }
+
+  .goal-block {
+    margin-top: 1.5rem;
+    padding-left: 1rem;
+    border-left: 3px solid color-mix(in srgb, currentColor 30%, transparent);
+  }
+</style>

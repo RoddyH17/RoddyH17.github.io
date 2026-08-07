@@ -1,0 +1,146 @@
+---
+// Protocol page: what the protocol is trying to do, what its token is worth
+// right now, and the notes written about it.
+//
+// The goal comes first deliberately. A mechanism only makes sense against the
+// problem it was built to solve, so the reader gets the intent before the math.
+import type { GetStaticPaths, InferGetStaticPropsType } from 'astro'
+import { getCollection } from 'astro:content'
+import LayoutDefault from '~/layouts/LayoutDefault.astro'
+import SiteSeo from '~/components/SiteSeo.astro'
+import TokenPrice from '~/components/research/TokenPrice.astro'
+import { CATEGORY_LABEL, SECTOR_LABEL, formatDate, getResearchByProtocol } from '~/utils'
+
+export const getStaticPaths = (async () => {
+  const protocols = await getCollection('protocols')
+  const notesByProtocol = await getResearchByProtocol()
+
+  return protocols.map(p => ({
+    params: { protocol: p.id },
+    props: { protocol: p, notes: notesByProtocol.get(p.id) ?? [] },
+  }))
+}) satisfies GetStaticPaths
+
+type Props = InferGetStaticPropsType<typeof getStaticPaths>
+
+const { protocol, notes } = Astro.props
+const d = protocol.data
+
+const links = [
+  ['Website', d.links.site],
+  ['GitHub', d.links.github],
+  ['DeepWiki', d.links.deepwiki],
+].filter((l): l is [string, string] => Boolean(l[1]))
+---
+
+<LayoutDefault>
+  <SiteSeo slot="seo" title={`${d.name} — Research`} desc={d.mechanism} />
+
+  <article class="prose">
+    <a href="/research" class="op-55 text-3.5">&larr; Research</a>
+
+    <header class="protocol-head">
+      <img src={d.logo} alt="" width="56" height="56" class="logo" />
+      <div class="min-w-0">
+        <h1 class="text-8 font-bold lh-tight m-0">{d.name}</h1>
+        <p class="op-60 text-3.5 m-0 mt-1">
+          {SECTOR_LABEL[d.sector] ?? d.sector}
+          {d.chains.length > 0 && ` · ${d.chains.join(', ')}`}
+        </p>
+      </div>
+    </header>
+
+    {/* No label above this. It is the lead sentence, not a labelled field —
+        the reader should hit the mechanism before anything else on the page. */}
+    <p class="mechanism-lead">{d.mechanism}</p>
+
+    {
+      d.token && (
+        <section class="mt-6">
+          <TokenPrice id={d.token.id} symbol={d.token.symbol} />
+        </section>
+      )
+    }
+
+    {
+      links.length > 0 && (
+        <p class="op-70 text-3.5 mt-6">
+          {links.map(([label, href], i) => (
+            <>
+              {i > 0 && ' · '}
+              <a href={href} target="_blank" rel="noopener">
+                {label}
+              </a>
+            </>
+          ))}
+        </p>
+      )
+    }
+
+    <hr />
+
+    <h2>Research</h2>
+
+    {
+      notes.length === 0 && (
+        <p class="op-60">
+          <em>
+            Nothing written yet. Scaffold the first note with
+            <code>./new_research.sh {protocol.id} &lt;slug&gt; "&lt;title&gt;" &lt;version&gt;</code>.
+          </em>
+        </p>
+      )
+    }
+
+    <ul class="note-list">
+      {
+        notes.map(note => (
+          <li>
+            <a href={`/research/${note.id}`} class="text-4.5 font-bold">
+              {note.data.version && `${note.data.version} · `}
+              {note.data.title}
+            </a>
+            <p class="op-55 text-3.25 m-0 mt-1">
+              {formatDate(note.data.pubDate)} · rev {note.data.revision} ·{' '}
+              {CATEGORY_LABEL[note.data.category] ?? note.data.category}
+              {note.data.draft && ' · draft'}
+            </p>
+            {note.data.goal && <p class="op-80 text-3.75 m-0 mt-1">{note.data.goal}</p>}
+          </li>
+        ))
+      }
+    </ul>
+  </article>
+</LayoutDefault>
+
+<style>
+  .protocol-head {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-top: 1.25rem;
+  }
+
+  .logo {
+    flex: none;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    object-fit: cover;
+    background: color-mix(in srgb, currentColor 8%, transparent);
+  }
+
+  .mechanism-lead {
+    margin: 1.5rem 0 0;
+    font-size: 1.15rem;
+    line-height: 1.65;
+  }
+
+  .note-list {
+    list-style: none;
+    padding-left: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+  }
+</style>

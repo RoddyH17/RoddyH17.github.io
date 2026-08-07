@@ -1,0 +1,87 @@
+---
+title: "AMM v2 LP"
+protocol: "uniswap"
+version: "v2"
+topic: "AMM v2 LP"
+# revision = which rewrite of THIS note (protocol version is `version` above)
+revision: 1
+# mechanism-math | architecture | economics | security | empirical
+category: mechanism-math
+goal: "Derive LP share issuance and the swap invariant of Uniswap v2 from x·y=k, and show exactly where the shipped uint256 code departs from the clean algebra and in whose favour."
+pubDate: "2026-08-05"
+description: "TODO: one line — what question this note answers"
+# exploring = still reading | working = derived, not verified | stable = verified against source + passing test
+status: exploring
+confidence: 0
+# Reusable mechanism cards this note derives from or feeds into.
+mechanisms: ["constant-product-invariant", "lp-share-accounting"]
+# Pinned code anchors. commit is required for a claim to count as a finding.
+sources:
+  - repo: "Uniswap/v2-core"
+    commit: "1136544ac842ff48ae0b1b939701436598d74075"
+    path: "contracts/UniswapV2Pair.sol"
+    lines: "170-182"
+    note: "optimistic transfer at 170-171, callback at 172, K check at 182"
+# DeepWiki retrieval trail — appended automatically by:
+#   ./scripts/deepwiki.sh ask <repo> "<question>" --note src/content/research/uniswap/amm-v2-lp.mdx
+deepwiki:
+  - repo: "Uniswap/v2-core"
+    question: "In UniswapV2Pair.swap, is the output token transferred before or after the K invariant check, and how is the 0.3 percent fee encoded into that check?"
+    url: "https://deepwiki.com/search/in-uniswapv2pairswap-is-the-ou_e8973a79-7d44-4425-8f88-3a2899960781"
+    date: "2026-08-05"
+  - repo: "Uniswap/v2-core"
+    question: "Four-section scan: architecture, mechanisms, swap pipeline, math and engineering foundations."
+    url: "https://deepwiki.com/search/answer-in-four-labeled-section_6168dd6b-c59e-4a37-86db-bb70eeecfabb"
+    date: "2026-08-05"
+open:
+  - "Broad omnibus questions produced a wrong answer (claimed the K check precedes the optimistic transfer); the narrow question got it right. Does that hold as a general rule for DeepWiki?"
+  - "Does the 1000/997 discount make k grow by exactly the fee, or is there a second-order term from the product of two adjusted balances?"
+draft: true
+---
+
+{/* Two sections, and only two. The first says what is being taken apart and
+    why it is not the traditional version of itself; the second is what the
+    source actually turned out to say. Everything else is either provenance
+    (already in the frontmatter above) or a conclusion that has not been
+    reached yet. */}
+
+## 1. The question we came in with
+
+{/* What is being researched, and what it replaces.
+
+    Name the traditional counterpart explicitly — a limit order book, a
+    market maker's quote, a bank's rate desk, a clearing house — and say
+    what it could rely on that this mechanism cannot: a counterparty, a
+    trusted operator, the ability to cancel, off-chain state, unbounded
+    precision.
+
+    The interesting question is almost always what had to be given up to
+    remove that reliance, and what the mechanism got in exchange.
+
+    One paragraph. If it takes three, the note is scoped too wide. */}
+
+TODO
+
+## 2. Reading the source
+
+{/* Not a tour of the repository. What was found by reading it, in the
+    order it was found, with the reasoning left in.
+
+    Three things belong here and nowhere else:
+
+    - What DeepWiki claimed, and whether the source agreed. It is a
+      retrieval layer, not a conclusion layer, and it does answer wrongly
+      — a broad question about UniswapV2Pair.swap put the K check before
+      the optimistic transfer, which is backwards. When it disagrees with
+      the code, the code wins and the disagreement gets written down here,
+      pinned to repo@commit:path#lines in `sources:` above.
+
+    - Where clean algebra and shipped code diverge: the fixed-point format,
+      which direction a quantity rounds, and whom that rounding favours.
+      The divergence is never an accident; say who it is for. This is the
+      part a second-hand summary cannot produce.
+
+    - What was misread first, and what corrected it. Future-you needs the
+      wrong turn more than the clean result. */}
+
+TODO

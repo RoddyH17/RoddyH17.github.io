@@ -9,6 +9,13 @@ export const userConfig: Partial<UserConfig> = {
       'Tech x Crypto Learning Roadmap — think, build, trade.',
     website: 'https://roddyh17.github.io/',
     pageSize: 10,
+    navLinks: [
+      { name: 'Posts', href: '/' },
+      { name: 'Research', href: '/research' },
+      { name: 'Archive', href: '/archive' },
+      { name: 'Categories', href: '/categories' },
+      { name: 'About', href: '/about' },
+    ],
     socialLinks: [
       {
         name: 'github',

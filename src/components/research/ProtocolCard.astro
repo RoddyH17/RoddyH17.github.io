@@ -1,0 +1,92 @@
+---
+// One protocol tile on the research index.
+//
+// A protocol with no notes yet is still shown, greyed and unclickable: the
+// point of the grid is to make the gaps visible, and a visible gap is a
+// research to-do, not a broken link.
+interface Props {
+  id: string
+  name: string
+  logo: string
+  chains: string[]
+  mechanism: string
+  noteCount: number
+}
+
+const { id, name, logo, chains, mechanism, noteCount } = Astro.props
+const open = noteCount > 0
+const Tag = open ? 'a' : 'div'
+
+// The theme inverts every <a> on hover, which would flood the whole tile with
+// the primary colour. `not-underline-hover` is the theme's own opt-out.
+---
+
+<Tag
+  href={open ? `/research/${id}` : undefined}
+  class:list={['protocol-card', 'not-underline-hover', { 'is-open': open }]}
+>
+  <img src={logo} alt="" width="40" height="40" loading="lazy" class="logo" />
+
+  <div class="min-w-0">
+    <div flex="~ gap-2 items-center wrap">
+      <span class="text-4.25 font-bold lh-tight">{name}</span>
+      {
+        chains.map(c => (
+          <span class="chain-tag">{c}</span>
+        ))
+      }
+    </div>
+
+    <p class="op-70 text-3.5 lh-relaxed m-0 mt-1.5">{mechanism}</p>
+
+    <p class="op-50 text-3.25 m-0 mt-2">
+      {open ? `${noteCount} note${noteCount > 1 ? 's' : ''}` : 'no notes yet'}
+    </p>
+  </div>
+</Tag>
+
+<style>
+  .protocol-card {
+    display: flex;
+    gap: 0.875rem;
+    padding: 1rem;
+    border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+    border-radius: 0.5rem;
+    color: inherit;
+    text-decoration: none;
+    transition:
+      transform 0.2s ease,
+      border-color 0.2s ease,
+      box-shadow 0.2s ease;
+  }
+
+  .protocol-card:not(.is-open) {
+    opacity: 0.45;
+    border-style: dashed;
+  }
+
+  .protocol-card.is-open:hover {
+    transform: translateY(-3px);
+    border-color: color-mix(in srgb, currentColor 45%, transparent);
+    box-shadow: 0 6px 18px var(--uno-colors-shadow, rgba(0, 0, 0, 0.06));
+  }
+
+  .logo {
+    flex: none;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    object-fit: cover;
+    background: color-mix(in srgb, currentColor 8%, transparent);
+  }
+
+  .chain-tag {
+    font-size: 0.65rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 0.1rem 0.4rem;
+    border-radius: 0.25rem;
+    opacity: 0.7;
+    border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+  }
+</style>

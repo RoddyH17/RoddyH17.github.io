@@ -42,6 +42,94 @@ export async function getPosts(isArchivePage = false) {
   return posts
 }
 
+export async function getResearch() {
+  const notes = await getCollection('research')
+
+  // Matrix order, not chronological: protocol, then version, then title.
+  notes.sort((a, b) => {
+    const p = a.data.protocol.localeCompare(b.data.protocol)
+    if (p !== 0) return p
+    const v = (a.data.version ?? '').localeCompare(b.data.version ?? '', undefined, { numeric: true })
+    if (v !== 0) return v
+    return a.data.title.localeCompare(b.data.title)
+  })
+
+  if (import.meta.env.PROD) {
+    return notes.filter(note => note.data.draft !== true)
+  }
+
+  return notes
+}
+
+/** Group research notes by protocol, preserving the sort order above. */
+export async function getResearchByProtocol() {
+  const notes = await getResearch()
+  const grouped = new Map<string, typeof notes>()
+
+  for (const note of notes) {
+    const list = grouped.get(note.data.protocol) || []
+    list.push(note)
+    grouped.set(note.data.protocol, list)
+  }
+
+  return grouped
+}
+
+/**
+ * Protocols for the research index, grouped by sector in a fixed reading order
+ * (what we study now first, what everything sits on last) rather than
+ * alphabetically — the order is editorial, so it is stated here, not inferred.
+ *
+ * `status` in the YAML is a hand-set intent; `noteCount` is the fact. A
+ * protocol with notes is always clickable regardless of what the YAML claims,
+ * so the two cannot contradict each other on screen.
+ */
+const SECTOR_ORDER = ['dex', 'perps', 'lending', 'infra'] as const
+
+export const SECTOR_LABEL: Record<string, string> = {
+  dex: 'DEX / AMM',
+  perps: 'Perpetuals',
+  lending: 'Lending',
+  infra: 'Infrastructure',
+}
+
+/** What kind of research a note is — displayed on the note header and index. */
+export const CATEGORY_LABEL: Record<string, string> = {
+  'mechanism-math': 'Mechanism math',
+  'architecture': 'Architecture',
+  'economics': 'Economics',
+  'security': 'Security',
+  'empirical': 'Empirical',
+}
+
+export async function getProtocolsBySector() {
+  const protocols = await getCollection('protocols')
+  const counts = await getResearchByProtocol()
+
+  const decorated = protocols.map(p => ({
+    ...p,
+    noteCount: counts.get(p.id)?.length ?? 0,
+  }))
+
+  const grouped = new Map<string, typeof decorated>()
+  for (const sector of SECTOR_ORDER) {
+    const inSector = decorated
+      .filter(p => p.data.sector === sector)
+      // Ones with research first, then the roadmap, each alphabetical.
+      .sort((a, b) => (b.noteCount - a.noteCount) || a.data.name.localeCompare(b.data.name))
+
+    if (inSector.length > 0) grouped.set(sector, inSector)
+  }
+
+  return grouped
+}
+
+/** One protocol by id, or undefined. Used by the protocol detail page. */
+export async function getProtocol(id: string) {
+  const protocols = await getCollection('protocols')
+  return protocols.find(p => p.id === id)
+}
+
 const parser = new MarkdownIt()
 export function getPostDescription(post: Post) {
   if (post.data.description) {
