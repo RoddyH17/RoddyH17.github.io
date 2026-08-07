@@ -1,0 +1,647 @@
+#!/usr/bin/env python3
+"""Notion 取数层的实现 —— 由 scripts/notion.sh 调用,不建议直接跑。
+
+职责只有两件:把 System III 及其日页拉下来,把 block 树转成 markdown 落盘。
+判断的事(这一节属于哪天、哪道题值得抄进 practice.rs)不在这里做 —— 见 PIPELINE.md
+「检索层不是结论层」。
+
+为什么是 Python 而不是像其它脚本一样纯 bash:block → markdown 要覆盖 16 种 block
+类型和富文本标注,塞进 bash 的 python3 -c 里没法维护。CLI 手感仍由 notion.sh 保持。
+"""
+import difflib
+import glob
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+
+API = "https://api.notion.com/v1"
+VERSION = "2022-06-28"  # 固定版本:新版把 database 拆成 data source,这里用不到
+TOKEN = os.environ.get("NOTION_TOKEN", "")
+ROOT_ID = os.environ.get("NOTION_SYSTEM_III_ID", "")
+CACHE = os.environ.get("NOTION_CACHE_DIR", ".cache/notion")
+
+# Notion 限流约 3 req/s。留一点余量。
+THROTTLE = 0.34
+_calls = 0
+
+
+# ---------------------------------------------------------------- API 客户端
+
+def _request(method, path, body=None):
+    global _calls
+    url = path if path.startswith("http") else f"{API}{path}"
+    data = json.dumps(body).encode() if body is not None else None
+    headers = {"Authorization": f"Bearer {TOKEN}", "Notion-Version": VERSION}
+    if data:
+        headers["Content-Type"] = "application/json"
+
+    for attempt in range(5):
+        time.sleep(THROTTLE)
+        _calls += 1
+        req = urllib.request.Request(url, data=data, headers=headers, method=method)
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return json.load(r)
+        except urllib.error.HTTPError as e:
+            # 429 按 Retry-After 退避;5xx 指数退避。其余直接抛。
+            if e.code == 429:
+                wait = float(e.headers.get("Retry-After", 1))
+                print(f"   限流,{wait}s 后重试…", file=sys.stderr)
+                time.sleep(wait)
+                continue
+            if 500 <= e.code < 600 and attempt < 4:
+                time.sleep(2 ** attempt)
+                continue
+            detail = e.read().decode(errors="replace")[:300]
+            raise SystemExit(f"❌ Notion API {e.code}: {detail}")
+    raise SystemExit("❌ 重试多次仍失败")
+
+
+def children(block_id):
+    """分页拉取一个 block 的所有直接子块。"""
+    out, cursor = [], None
+    while True:
+        q = f"/blocks/{block_id}/children?page_size=100"
+        if cursor:
+            q += f"&start_cursor={cursor}"
+        d = _request("GET", q)
+        out += d["results"]
+        if not d.get("has_more"):
+            return out
+        cursor = d["next_cursor"]
+
+
+def fetch_tree(block_id):
+    """递归拉成嵌套树。
+
+    遇到 child_page 必须停 —— 子页会各自单独落一个文件,内联进来就会存两遍。
+    """
+    out = []
+    for b in children(block_id):
+        if b.get("has_children") and b["type"] != "child_page":
+            b["_children"] = fetch_tree(b["id"])
+        out.append(b)
+    return out
+
+
+def page_title(page):
+    for v in page.get("properties", {}).values():
+        if v.get("type") == "title":
+            return "".join(x["plain_text"] for x in v["title"]).strip()
+    return "(无标题)"
+
+
+# ------------------------------------------------------------ markdown 转换
+
+def _wrap(s, left, right=None):
+    """给文本加标记,但把首尾空白留在标记外面。
+
+    Notion 的加粗常常把尾随空格也包进去,直接写成 `** x **` 在 markdown 里不生效。
+    """
+    right = right or left
+    core = s.strip()
+    if not core:
+        return s
+    lead = s[: len(s) - len(s.lstrip())]
+    trail = s[len(s.rstrip()):]
+    return f"{lead}{left}{core}{right}{trail}"
+
+
+def rich(rts):
+    """rich_text 数组 → markdown 内联文本。
+
+    顺序要紧:code 最内层,再 bold/italic,链接最外层。
+    """
+    parts = []
+    for t in rts or []:
+        s = t.get("plain_text", "")
+        if t.get("type") == "equation":
+            s = f"${s}$"
+        a = t.get("annotations", {})
+        if a.get("code"):
+            s = _wrap(s, "`")
+        if a.get("bold"):
+            s = _wrap(s, "**")
+        if a.get("italic"):
+            s = _wrap(s, "*")
+        if a.get("strikethrough"):
+            s = _wrap(s, "~~")
+        if t.get("href"):
+            s = f"[{s.strip()}]({t['href']})"
+        parts.append(s)
+    return "".join(parts)
+
+
+def _text(b):
+    return rich(b.get(b["type"], {}).get("rich_text"))
+
+
+def _table(b):
+    """table 的行都在 children 里,cells 是 [列][rich_text]。"""
+    body = b.get("table", {})
+    rows = b.get("_children", [])
+    lines = []
+    for i, row in enumerate(rows):
+        cells = row.get("table_row", {}).get("cells", [])
+        lines.append("| " + " | ".join(rich(c).replace("|", "\\|") for c in cells) + " |")
+        if i == 0 and body.get("has_column_header"):
+            lines.append("|" + "|".join([" --- "] * len(cells)) + "|")
+    return lines
+
+
+def render(blocks, _depth=0):
+    """block 列表 → markdown 行列表。"""
+    lines = []
+    counter = 0  # 有序列表的连续编号,被别的块打断就归零
+
+    for b in blocks:
+        t = b["type"]
+        kids = b.get("_children", [])
+        counter = counter + 1 if t == "numbered_list_item" else 0
+
+        if t.startswith("heading_"):
+            lines += ["", "#" * int(t[-1]) + " " + _text(b), ""]
+
+        elif t == "paragraph":
+            lines.append(_text(b))
+
+        elif t == "code":
+            body = b["code"]
+            lang = (body.get("language") or "").replace("plain text", "text")
+            lines += ["", f"```{lang}"]
+            lines += "".join(x["plain_text"] for x in body["rich_text"]).split("\n")
+            lines += ["```", ""]
+            if body.get("caption"):
+                lines += [rich(body["caption"]), ""]
+
+        elif t == "quote":
+            inner = [_text(b)] + (render(kids, _depth + 1) if kids else [])
+            lines += ["", *[f"> {ln}" if ln else ">" for ln in inner], ""]
+
+        elif t == "callout":
+            # 沿用 Notion 侧已有的写法(见 PIPELINE.md 的 house style)
+            body = b["callout"]
+            icon = (body.get("icon") or {}).get("emoji", "")
+            color = body.get("color", "default")
+            inner = [_text(b)] + (render(kids, _depth + 1) if kids else [])
+            lines += ["", f'<callout icon="{icon}" color="{color}">']
+            lines += [f"\t{ln}" for ln in inner]
+            lines += ["</callout>", ""]
+
+        elif t == "toggle":
+            lines += ["", "<details>", f"<summary>{_text(b)}</summary>", ""]
+            lines += render(kids, _depth + 1)
+            lines += ["", "</details>", ""]
+
+        elif t in ("bulleted_list_item", "numbered_list_item"):
+            marker = "- " if t == "bulleted_list_item" else f"{counter}. "
+            lines.append(marker + _text(b))
+            if kids:
+                lines += ["  " + ln for ln in render(kids, _depth + 1)]
+
+        elif t == "to_do":
+            box = "x" if b["to_do"].get("checked") else " "
+            lines.append(f"- [{box}] " + _text(b))
+            if kids:
+                lines += ["  " + ln for ln in render(kids, _depth + 1)]
+
+        elif t == "table":
+            lines += ["", *_table(b), ""]
+
+        elif t == "image":
+            body = b["image"]
+            kind = body["type"]  # file = Notion 托管(签名) / external = 外链
+            url = body.get(kind, {}).get("url", "")
+            cap = rich(body.get("caption")) or ""
+            # Notion 托管的图是 S3 签名链接,约 1 小时过期,而且**每次拉取签名都不同**。
+            # 直接写进缓存的话,每跑一次 fetch,diff 就会把这些行全报成"改动过"
+            # (Day3 有 7 张图 = 每次 7 行假差异)。所以剥掉查询串只留稳定路径:
+            # 它不能直接访问,但 diff 从此干净;要真的用图,靠下面的 block id 回 Notion 换新链接。
+            if kind == "file":
+                url = url.split("?", 1)[0]
+            lines += ["", f"![{cap}]({url})", f"<!-- notion-block: {b['id']} -->", ""]
+
+        elif t == "equation":
+            lines += ["", "$$", b["equation"]["expression"], "$$", ""]
+
+        elif t == "divider":
+            lines += ["", "---", ""]
+
+        elif t == "child_page":
+            lines += ["", f"<!-- child page: {b['child_page']['title']} "
+                          f"(id {b['id']}) 单独落文件,不内联 -->", ""]
+
+        elif t == "table_of_contents":
+            pass  # 目录是 Notion 的渲染件,不是内容
+
+        else:
+            lines.append(f"<!-- 未处理的 block 类型: {t} -->")
+            if kids:
+                lines += render(kids, _depth + 1)
+
+    return lines
+
+
+def to_markdown(title, tree):
+    lines = [f"# {title}", ""] + render(tree)
+    out, blank = [], False
+    for ln in lines:  # 折叠连续空行
+        if not ln.strip():
+            if blank:
+                continue
+            blank = True
+        else:
+            blank = False
+        out.append(ln.rstrip())
+    return "\n".join(out).strip() + "\n"
+
+
+# ------------------------------------------------------------------ 缓存层
+
+def slugify(title):
+    s = re.sub(r"[^\w一-鿿]+", "-", title.lower()).strip("-")
+    return s or "page"
+
+
+def meta_path():
+    return os.path.join(CACHE, "meta.json")
+
+
+def load_meta():
+    try:
+        with open(meta_path()) as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+
+
+CHAPTER_RE = re.compile(r"chapter\s*(\d+)", re.I)
+DAY_RE = re.compile(r"day\s*(\d+)", re.I)
+
+# 直接挂在 System III 下的日页归第 1 章 —— 这是当前的实际布局(Chapter 1 只是父页
+# 正文里的一个标题,没有单独成页)。以后 Chapter 2 会单独建页,日页挂在它下面。
+DEFAULT_CHAPTER = 1
+
+
+def day_of(title):
+    m = DAY_RE.search(title)
+    return int(m.group(1)) if m else None
+
+
+def discover():
+    """父页 → (可选的 Chapter 页) → 日页,自动发现,加一天/加一章都不用改代码。
+
+    日号只在章内唯一:Chapter 2 会重新从 Day 1 开始,所以标识是 (chapter, day)。
+    """
+    root = _request("GET", f"/pages/{ROOT_ID}")
+    pages = [{"id": ROOT_ID, "title": page_title(root) or "System III",
+              "last_edited": root["last_edited_time"],
+              "kind": "root", "chapter": None, "day": None}]
+
+    def scan(parent_id, chapter):
+        for b in children(parent_id):
+            if b["type"] != "child_page":
+                continue
+            title = b["child_page"]["title"].strip()
+            cm = CHAPTER_RE.search(title)
+            entry = {"id": b["id"], "title": title,
+                     "last_edited": b["last_edited_time"],
+                     "kind": "chapter" if cm else "day",
+                     "chapter": int(cm.group(1)) if cm else chapter,
+                     "day": None if cm else day_of(title)}
+            pages.append(entry)
+            if cm:  # 章页:继续往里找日页
+                scan(b["id"], int(cm.group(1)))
+
+    scan(ROOT_ID, DEFAULT_CHAPTER)
+    return pages
+
+
+# ------------------------------------------------------------------ 子命令
+
+def _label(p):
+    if p["kind"] == "root":
+        return "父页"
+    if p["kind"] == "chapter":
+        return f"第 {p['chapter']} 章"
+    if p["day"] is None:
+        return "⚠️ 无日号"
+    return f"C{p['chapter']}·Day {p['day']}"
+
+
+def cmd_list():
+    pages = discover()
+    days = [p for p in pages if p["kind"] == "day"]
+    print(f"System III 下共 {len(days)} 个日页:\n")
+    for p in pages:
+        indent = "  " if p["kind"] == "day" and any(q["kind"] == "chapter" for q in pages) else ""
+        print(f"  [{_label(p):>10}] {indent}{p['title'][:50]:52} edited {p['last_edited'][:16]}")
+
+    nameless = [p["title"] for p in days if p["day"] is None]
+    if nameless:
+        print(f"\n⚠️  以下页面标题里没有 Day 号,管道认不出来:")
+        for t in nameless:
+            print(f"   {t}")
+    print(f"\nAPI 调用: {_calls}")
+
+
+def cmd_fetch(force=False):
+    os.makedirs(CACHE, exist_ok=True)
+    meta = load_meta()
+    pages = discover()
+    changed = 0
+
+    for p in pages:
+        slug = slugify(p["title"])
+        old = meta.get(p["id"], {})
+        md_file = os.path.join(CACHE, f"{slug}.md")
+
+        if not force and old.get("last_edited") == p["last_edited"] and os.path.exists(md_file):
+            # 正文没变,但页面可能被改名或挪到别的章下 —— 这些来自 discover(),不要钱,
+            # 所以跳过内容拉取时仍要把它们刷新,否则改名/换章后 meta 会永远停在旧值。
+            old.update({"title": p["title"], "slug": slug, "kind": p["kind"],
+                        "chapter": p["chapter"], "day": p["day"]})
+            meta[p["id"]] = old
+            print(f"  ⏭  {p['title'][:46]:48} 未变更,跳过")
+            continue
+
+        before = _calls
+        tree = fetch_tree(p["id"])
+        md = to_markdown(p["title"], tree)
+
+        if os.path.exists(md_file):  # 留一份给 diff 比对
+            os.replace(md_file, os.path.join(CACHE, f"{slug}.prev.md"))
+        with open(md_file, "w") as f:
+            f.write(md)
+        with open(os.path.join(CACHE, f"{slug}.json"), "w") as f:
+            json.dump(tree, f, ensure_ascii=False)
+
+        meta[p["id"]] = {"title": p["title"], "slug": slug,
+                         "last_edited": p["last_edited"], "kind": p["kind"],
+                         "chapter": p["chapter"], "day": p["day"],
+                         "chars": len(md), "blocks": len(tree),
+                         "fetched": time.strftime("%Y-%m-%dT%H:%M:%S")}
+        changed += 1
+        print(f"  ✅ {p['title'][:46]:48} {len(md):>6} 字符, {_calls - before} 次调用")
+
+    # 页面改名会换 slug,旧文件会留在缓存里变成孤儿 —— 清掉,免得 day/audit 读到旧内容
+    live = {m["slug"] for m in meta.values()}
+    orphans = [f for f in os.listdir(CACHE)
+               if f != "meta.json"
+               and re.sub(r"\.(prev\.md|md|json)$", "", f) not in live]
+    for f in orphans:
+        os.remove(os.path.join(CACHE, f))
+
+    with open(meta_path(), "w") as f:
+        json.dump(meta, f, ensure_ascii=False, indent=2)
+
+    print(f"\n{changed} 页更新,{len(pages) - changed} 页跳过。API 调用: {_calls}")
+    if orphans:
+        print(f"清理了 {len(orphans)} 个改名遗留的孤儿缓存文件")
+    print(f"缓存目录: {CACHE}/")
+
+
+def _day_pages():
+    return [m for m in load_meta().values() if m.get("day")]
+
+
+def _find_day(day, chapter=None):
+    """日号只在章内唯一,跨章重号时必须指明是哪一章。"""
+    hits = [m for m in _day_pages()
+            if m["day"] == day and (chapter is None or m.get("chapter") == chapter)]
+    if len(hits) > 1:
+        chs = sorted(m.get("chapter") for m in hits)
+        raise SystemExit(f"❌ Day {day} 在第 {chs} 章里都有。请指明,例如: day {chs[0]}.{day}")
+    return hits[0] if hits else None
+
+
+def _parse_day_arg(arg):
+    """接受 `3` 或 `2.3`(第 2 章 Day 3)。"""
+    if "." in arg:
+        c, d = arg.split(".", 1)
+        return int(d), int(c)
+    return int(arg), None
+
+
+def cmd_day(arg):
+    day, chapter = _parse_day_arg(arg)
+    m = _find_day(day, chapter)
+    if not m:
+        have = sorted((x.get("chapter"), x["day"]) for x in _day_pages())
+        listed = ", ".join(f"C{c}·Day{d}" for c, d in have) or "(空,先跑 fetch)"
+        raise SystemExit(f"❌ 缓存里没有这一天。已有: {listed}")
+    with open(os.path.join(CACHE, f"{m['slug']}.md")) as f:
+        sys.stdout.write(f.read())
+
+
+def cmd_diff():
+    meta = load_meta()
+    if not meta:
+        raise SystemExit("❌ 还没有缓存,先跑 fetch")
+    changed, no_history = 0, []
+
+    for m in meta.values():
+        cur_p = os.path.join(CACHE, f"{m['slug']}.md")
+        prev_p = os.path.join(CACHE, f"{m['slug']}.prev.md")
+        # 「没有历史」和「没有变化」是两回事,不能混为一谈报成「无变化」
+        if not os.path.exists(prev_p):
+            no_history.append(m["title"])
+            continue
+        with open(cur_p) as f:
+            cur = f.read().splitlines()
+        with open(prev_p) as f:
+            prev = f.read().splitlines()
+        if cur == prev:
+            continue
+
+        changed += 1
+        add = rm = 0
+        for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, prev, cur).get_opcodes():
+            if tag in ("replace", "delete"):
+                rm += i2 - i1
+            if tag in ("replace", "insert"):
+                add += j2 - j1
+        print(f"\n【{m['title']}】 +{add} / -{rm} 行")
+        for ln in difflib.unified_diff(prev, cur, lineterm="", n=0):
+            if ln.startswith("@@") or ln[:3] in ("---", "+++"):
+                continue
+            if re.match(r"^[+-]#{1,4} ", ln):  # 标题增删最值得看
+                print(f"   {ln[:76]}")
+
+    if no_history:
+        print(f"⚠️  {len(no_history)} 页尚无历史版本可比(首次拉取):")
+        for t in no_history:
+            print(f"   {t}")
+    if not changed and not no_history:
+        print("与上次拉取相比没有变化。")
+
+
+# ------------------------------------------------------------------- audit
+
+RUST_LEARN = os.path.expanduser(os.environ.get("RUST_LEARN_DIR", "~/rust_learn"))
+BLOG_POSTS = "src/content/posts/rust"
+
+
+def _headings(md_text, skip_first=False):
+    hs = re.findall(r"^#{1,4} (.+)$", md_text, re.M)
+    return hs[1:] if skip_first and hs else hs
+
+
+def _git_tracked(repo, path):
+    """未追踪 ≠ 不存在。查 git 而不是拿 git 当存在性判据 —— 两件事。"""
+    try:
+        r = subprocess.run(["git", "-C", repo, "ls-files", "--error-unmatch", path],
+                           capture_output=True, timeout=20)
+        return r.returncode == 0
+    except Exception:
+        return None
+
+
+def _day_dir(chapter, day):
+    """(chapter, day) → rust_learn 目录。
+
+    第 1 章沿用既有的扁平 dayN/。第 2 章之后会和第 1 章重号(都从 Day 1 开始),
+    届时需要一个新约定 —— 这里不替他发明,直接报出来让人决定。
+    """
+    if chapter != 1:
+        return None, f"第 {chapter} 章尚无目录约定(会与第 1 章的 day{day}/ 重名),需先决定"
+    hits = sorted(glob.glob(os.path.join(RUST_LEARN, f"day{day}", "*", "Cargo.toml")))
+    base = os.path.join(RUST_LEARN, f"day{day}")
+    if not os.path.isdir(base):
+        return None, None
+    return {"base": base, "crates": [os.path.dirname(h) for h in hits]}, None
+
+
+def _audit_one(m):
+    ch, day = m.get("chapter"), m["day"]
+    print(f"\nC{ch} · Day {day} — {m['title']}")
+
+    # --- Notion ---------------------------------------------------------
+    cache_md = os.path.join(CACHE, f"{m['slug']}.md")
+    with open(cache_md) as f:
+        notion_md = f.read()
+    n_heads = _headings(notion_md, skip_first=True)
+    print(f"  Notion    ✅  {m['chars']} 字符, {m.get('blocks','?')} blocks, {len(n_heads)} 个小节")
+
+    # --- rust_learn ------------------------------------------------------
+    d, why = _day_dir(ch, day)
+    if why:
+        print(f"  NOTES.md  ⚠️  {why}")
+        print(f"  practice  ⚠️  同上")
+    elif not d:
+        print(f"  NOTES.md  ❌  {RUST_LEARN}/day{day}/ 不存在")
+        print(f"  practice  ❌  同上")
+    else:
+        notes = os.path.join(d["base"], "NOTES.md")
+        if os.path.exists(notes):
+            with open(notes) as f:
+                nh = _headings(f.read(), skip_first=True)
+            print(f"  NOTES.md  ✅  day{day}/NOTES.md — {len(nh)} 个小节")
+            # 两边标题字面对不上(中英夹杂 + 改写),做相似度匹配只会给出虚假的精确感。
+            # 并排列出,由人判断,不输出覆盖率百分比。
+            print(f"            Notion: {' / '.join(h[:22] for h in n_heads[:6])}"
+                  + (" …" if len(n_heads) > 6 else ""))
+            print(f"            NOTES : {' / '.join(h[:22] for h in nh[:6])}"
+                  + (" …" if len(nh) > 6 else ""))
+            print(f"            ↑ 覆盖与否需人工判断(标题不同源,不做自动匹配)")
+        else:
+            print(f"  NOTES.md  ❌  day{day}/NOTES.md 不存在")
+
+        prac = [os.path.join(c, "examples", "practice.rs") for c in d["crates"]]
+        prac = [p for p in prac if os.path.exists(p)]
+        if not prac:
+            print(f"  practice  ❌  day{day}/*/examples/practice.rs 不存在")
+        for p in prac:
+            crate = os.path.dirname(os.path.dirname(p))
+            rel = os.path.relpath(p, RUST_LEARN)
+            try:
+                r = subprocess.run(["cargo", "build", "--example", "practice", "--quiet"],
+                                   cwd=crate, capture_output=True, text=True, timeout=300)
+                errs = len(re.findall(r"^error", r.stderr, re.M))
+                if r.returncode == 0:
+                    print(f"  practice  ✅  {rel} — 原样编译通过")
+                else:
+                    print(f"  practice  ⚠️  {rel} — **编译失败**({errs} 个错误)")
+                    first = next((l for l in r.stderr.splitlines() if l.startswith("error")), "")
+                    print(f"            {first[:88]}")
+            except FileNotFoundError:
+                print(f"  practice  ⚠️  {rel} 存在,但本机没有 cargo,无法验证")
+            except subprocess.TimeoutExpired:
+                print(f"  practice  ⚠️  {rel} — 编译超时(>300s)")
+            if _git_tracked(RUST_LEARN, rel) is False:
+                print(f"            └─ ⚠️ 该文件未被 git 追踪(存在但没提交)")
+
+    # --- blog ------------------------------------------------------------
+    posts = sorted(glob.glob(os.path.join(BLOG_POSTS, f"day-{day}-*.md*")))
+    if not posts:
+        print(f"  blog      ❌  {BLOG_POSTS}/day-{day}-*.mdx 不存在")
+    for p in posts:
+        with open(p) as f:
+            head = f.read(600)
+        draft = re.search(r"^draft:\s*true", head, re.M)
+        mark = "⚠️" if draft else "✅"
+        print(f"  blog      {mark}  {os.path.basename(p)}"
+              + ("  — 仍是草稿(draft: true),未上线" if draft else ""))
+
+
+def cmd_audit(arg=None):
+    days = sorted(_day_pages(), key=lambda m: (m.get("chapter") or 0, m["day"]))
+    if not days:
+        raise SystemExit("❌ 缓存里没有日页,先跑 fetch")
+
+    if arg:
+        day, chapter = _parse_day_arg(arg)
+        m = _find_day(day, chapter)
+        if not m:
+            raise SystemExit(f"❌ 缓存里没有这一天")
+        days = [m]
+
+    for m in days:
+        _audit_one(m)
+
+    # 父页正文里还没被任何一天认领的内容 —— 最容易被忽略的一种漏
+    root = next((m for m in load_meta().values() if m.get("kind") == "root"), None)
+    if root and not arg:
+        with open(os.path.join(CACHE, f"{root['slug']}.md")) as f:
+            heads = _headings(f.read(), skip_first=True)
+        if heads:
+            print(f"\n⚠️  父页正文里还有 {len(heads)} 个小节没有被任何一天认领:")
+            for h in heads[:12]:
+                print(f"   {h[:66]}")
+            print("   这些内容写在 Notion 里,但不属于任何一天,永远不会流向下游。")
+
+
+# --------------------------------------------------------------------- main
+
+def main():
+    if not TOKEN or not ROOT_ID:
+        raise SystemExit("❌ 缺 NOTION_TOKEN / NOTION_SYSTEM_III_ID(应由 notion.sh 从 .env 载入)")
+
+    cmd = sys.argv[1] if len(sys.argv) > 1 else ""
+    args = sys.argv[2:]
+
+    if cmd == "list":
+        cmd_list()
+    elif cmd == "fetch":
+        cmd_fetch(force="--force" in args)
+    elif cmd == "day":
+        if not args or not re.fullmatch(r"\d+(\.\d+)?", args[0]):
+            raise SystemExit("❌ 用法: notion.sh day <N>  或  day <章>.<N>")
+        cmd_day(args[0])
+    elif cmd == "diff":
+        cmd_diff()
+    elif cmd == "audit":
+        if args and not re.fullmatch(r"\d+(\.\d+)?", args[0]):
+            raise SystemExit("❌ 用法: notion.sh audit [N]  或  audit <章>.<N>")
+        cmd_audit(args[0] if args else None)
+    else:
+        raise SystemExit(f"❌ 未知命令: {cmd or '(空)'}")
+
+
+if __name__ == "__main__":
+    main()

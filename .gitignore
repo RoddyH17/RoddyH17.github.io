@@ -22,3 +22,9 @@ pnpm-debug.log*
 
 Markdown style guide.md
 .gstack/
+
+# 管道缓存(Notion 是 source of truth,缓存不入库)
+.cache/
+
+# Python
+__pycache__/
