@@ -687,6 +687,44 @@ def _audit_one(day):
     else:
         print(f"  main.rs   ❌  {os.path.relpath(main_rs, RUST_LEARN)} 不存在")
 
+    # --- 调试配置 ---------------------------------------------------------
+    # 改目录名或改 Cargo.toml 的包名都会静默弄坏 launch.json —— cargo 不看目录名,
+    # 照跑不误,只有按 F5 才发现调试起不来。这里主动查一次。
+    lj = os.path.join(RUST_LEARN, ".vscode", "launch.json")
+    if os.path.exists(lj):
+        with open(lj) as f:
+            raw = re.sub(r"^\s*//.*$", "", f.read(), flags=re.M)
+        try:
+            confs = json.loads(raw).get("configurations", [])
+        except json.JSONDecodeError:
+            confs = None
+        if confs is None:
+            print("  debug     ⚠️  .vscode/launch.json 不是合法 JSON")
+        else:
+            mine = [c for c in confs if re.search(rf"Day {day}\b", c.get("name", ""))]
+            if not mine:
+                print(f"  debug     ❌  launch.json 里没有 Day {day} 的配置")
+            else:
+                pkg = ""
+                toml = os.path.join(crate, "Cargo.toml")
+                if os.path.exists(toml):
+                    m = re.search(r'^name\s*=\s*"([^"]+)"', open(toml).read(), re.M)
+                    pkg = m.group(1) if m else ""
+                bad = []
+                for c in mine:
+                    cwd = (c.get("cwd") or "").replace("${workspaceFolder}/", "")
+                    if not os.path.isdir(os.path.join(RUST_LEARN, cwd)):
+                        bad.append(f"{c['name']} → 路径不存在: {cwd}")
+                    f_ = (c.get("cargo") or {}).get("filter") or {}
+                    if f_.get("kind") == "bin" and pkg and f_.get("name") != pkg:
+                        bad.append(f"{c['name']} → filter 名 {f_.get('name')!r} ≠ 包名 {pkg!r}")
+                if bad:
+                    print(f"  debug     ❌  {len(mine)} 条配置有问题:")
+                    for b in bad:
+                        print(f"            {b}")
+                else:
+                    print(f"  debug     ✅  {len(mine)} 条配置,路径与包名都对得上")
+
     # --- practice ---------------------------------------------------------
     prac = os.path.join(crate, "examples", "practice.rs")
     if not os.path.exists(prac):
