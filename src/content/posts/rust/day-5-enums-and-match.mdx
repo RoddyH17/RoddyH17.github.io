@@ -1,0 +1,280 @@
+---
+title: "Day 5 · Enums and Match — A Type That Says \"One Of\", and a Compiler That Counts"
+pubDate: "2026-08-10"
+author: "Roddy"
+description: "In C++ an enum is a named integer. In Rust it is a sum type: each variant can carry its own payload, which is what makes Option and Result possible. Plus why a lowercase name in a match arm swallows every case, and why an enum with one variant is zero bytes."
+categories: ['rust']
+---
+
+# Day 5 · Enums and Match
+
+TypeScript and C++ both have `enum`, and in both of them it is fundamentally a **name for a number**. C++ gets you a bit further — `enum class Direction` at least has a type — but the variant still carries nothing.
+
+Rust's enum is a different animal. Each variant can hold its own data, of its own shape. That single difference is why `Option` and `Result` exist as ordinary library types instead of language features, and it is most of what today was about.
+
+> Today's code: [`day5/enum_struct_match/`](https://github.com/RoddyH17/rust_learn/tree/main/day5/enum_struct_match) · Notes: [`day5/NOTES.md`](https://github.com/RoddyH17/rust_learn/blob/main/day5/NOTES.md)
+
+## Three shapes of variant
+
+```rust
+#[derive(Debug)]
+enum Pets {
+    Cat(String),                        // tuple variant
+    Dog { names: String, ages: usize }, // struct variant
+    Bird,                               // unit variant
+}
+```
+
+One type, three variants, three different payload shapes. A `Pets` is exactly one of these at any moment — that's the "sum type" part, and it's the thing C++ can't say.
+
+Then I wrote this, and it taught me something I did not expect:
+
+```rust
+let cat = Pets::Cat;
+```
+
+It compiles. It is also not what it looks like. `Pets::Cat` is a *tuple variant*, so the bare path is the **constructor function** — its type is `fn(String) -> Pets`, not `Pets`. I hadn't given it the `String` it needs, so I didn't build a cat, I bound a function. To actually get a value:
+
+```rust
+let cat = Pets::Cat("Tom".to_string());
+let dog = Pets::Dog { names: "Allen".to_string(), ages: 18 };
+```
+
+Unit variants like `Bird` are the only ones where the bare path *is* a value, because there's nothing left to supply.
+
+## Methods and associated functions differ by one word
+
+```rust
+impl Pets {
+    fn speak(&self) {                 // method — takes self
+        println!("hi");
+    }
+    fn log(name: String) {            // associated function — no self
+        println!("name is {name}");
+    }
+}
+```
+
+`dog.speak()` works. `dog.log("...")` does not compile — and the reason isn't that `log` is missing, it's that `log` was never attached to a *value*. Without `self` it belongs to the type, not to any instance, so it's reached by path:
+
+```rust
+Pets::log("alen".to_string());
+```
+
+The `::` is a namespace lookup, the `.` is a value lookup. Constructors in Rust are just associated functions by convention (`String::from`, `Vec::new`) — that's the whole story behind why you write `::new()` and not `.new()`.
+
+## `#[derive]` is a macro that writes the impl for you
+
+Comparing two enum values with `==` doesn't work out of the box:
+
+```rust
+#[derive(PartialEq)]
+enum Pets { Cat, Dog }
+```
+
+`derive` is an **attribute macro** — specifically a procedural macro. At compile time the compiler hands your type definition to it as a syntax tree, and the macro hands back new code that gets spliced into the source. So `#[derive(Debug, Clone, PartialEq)]` on a type is literally equivalent to having typed out:
+
+```rust
+impl Debug     for Pets { /* field by field */ }
+impl Clone     for Pets { /* field by field */ }
+impl PartialEq for Pets { /* field by field */ }
+```
+
+Pure compile-time codegen, **zero runtime cost** — the generated code is indistinguishable from hand-written. Which is why `{:?}` needs `Debug` and `==` needs `PartialEq`: nothing is free by default, you just have a one-line way to ask.
+
+## `match` counts your cases, and a lowercase name eats them all
+
+```rust
+match cat {
+    Pets::Cat => println!("is cat"),
+    Pets::Dog => println!("is dog"),
+}
+```
+
+Every variant must be covered. Miss one and it's a compile error, not a silent fallthrough — the compiler is keeping count for you.
+
+Then I tried it on an integer and hit the interesting failure:
+
+```rust
+let num = 1;
+match num {
+    o => {}    // ← matches everything
+    1 => {}    // warning: unreachable pattern
+    _ => {}    // warning: unreachable pattern
+}
+```
+
+I had read `o` as a value to compare against. It isn't. **A lowercase identifier in a pattern position is a binding**, so `o` matches any value and names it `o` — it's `_` with a name attached. The compiler said it plainly: `o` *matches any value*, `1` — *no value can reach this*.
+
+Which also explains why an `i32` needs `_`. You can't enumerate four billion cases, so you write the arms you care about and let `_` absorb the rest:
+
+```rust
+match num {
+    1 => println!("one"),
+    _ => println!("something else"),
+}
+```
+
+And the related trap with `if let`:
+
+```rust
+if let cat = Pets::Cat { }   // warning: irrefutable `if let` pattern
+```
+
+Same cause. `cat` is a binding, so the pattern always matches, so the `if` is decoration. `if let` wants a **refutable** pattern — one that can fail — because its whole job is "I only care about this one case":
+
+```rust
+if let Pets::Cat = pet { println!("is cat"); }
+```
+
+## `Option` puts absence in the type
+
+```rust
+let num = Some(1);
+let none: Option<usize> = None;
+```
+
+`Option<T>` is just an enum with two variants — `Some(T)` and `None` — and it's Rust's answer to the null pointer. Not "checked at runtime", but *there is no null to forget about*: if a value can be missing, that fact is in the type, and `match` won't let you skip the missing branch.
+
+You meet it everywhere something can legitimately not be there:
+
+```rust
+let map: HashMap<&str, usize> = HashMap::new();
+let a = map.get("a");                 // Option<&usize> — the key may not exist
+
+let vec = vec![1, 2, 3];
+let last_one = vec.iter().last();     // Option<&i32> — the vec may be empty
+```
+
+`map.get("a")` does not hand you a `usize`. It hands you an `Option<&usize>`, and you have to say what happens when it's empty before you can touch the number.
+
+One small note on `_`, because it wears two hats and I confused them today:
+
+- in a **pattern** — `Some(_)` — it means *there is a value here and I don't care what it is*
+- in a **type** — `Vec<_>` — it means *compiler, infer this*
+- `()` is neither; it is a concrete type, the empty tuple, "no meaningful value"
+
+## `Result` is `Option` that tells you why
+
+```rust
+let num: Result<usize, ()> = Ok(1);
+match num {
+    Ok(_) => {}
+    Err(_) => {}
+}
+```
+
+Same shape, but the failure branch carries a payload — the reason. Parsing is the everyday example:
+
+```rust
+let len: Result<usize, ParseIntError> = "24".parse();
+```
+
+`parse` cannot promise you a number, so it returns `Result`, and the error side tells you *what went wrong* rather than merely that something did.
+
+`main` can return one too:
+
+```rust
+fn main() -> Result<(), ()> {
+    // ...
+    Ok(())
+}
+```
+
+I'd assumed `main` had no return type. It has `()` by default — but it's allowed to return a `Result`, and then an `Err` becomes a non-zero exit code without you writing any of that plumbing.
+
+## Converting between them is an abstraction-boundary move
+
+This was the day's own thought rather than something in the video:
+
+> 因为两者携带的信息量不同,而函数边界两侧对信息的需求经常不一样。Option 说的是「没有」,Result 说的是「失败了,原因是 X」。转换发生在你跨越抽象层的时候。
+
+`ok_or` goes up — you supply the reason that `Option` never had:
+
+```rust
+let opt: Option<i32> = Some(42);
+let result: Result<i32, &str> = opt.ok_or("error");
+assert_eq!(result, Ok(42));
+
+let none: Option<i32> = None;
+assert_eq!(none.ok_or("error"), Err("error"));
+```
+
+`ok()` goes down — you throw the reason away because the caller only asked "is there one?":
+
+```rust
+let res: Result<i32, &str> = Err("error");
+assert_eq!(res.ok(), None);
+```
+
+The asymmetry is the point: one direction needs an argument, the other loses information.
+
+## Not every `Option` deserves a `match`
+
+Writing a four-line `match` to add 1 to a number gets old fast, so both types come with combinators:
+
+```rust
+let option = Some(1);
+
+let b = option.map(|num| num + 1);        // Some(2) — transform if present
+let c = option.and_then(|v| Some(v + 1)); // like map, but the closure returns an Option
+let d = option.or_else(|| Some(1));       // supply a fallback if None
+
+let a = option.unwrap();                  // give me the value — PANICS on None
+let a = option.expect("msg");             // same, with your own panic message
+```
+
+`map` and `and_then` keep you inside `Option`; `unwrap` and `expect` leave it — by asserting the `None` case cannot happen. When you're wrong, the program dies. `expect` at least dies with a sentence you wrote.
+
+## An enum is a tag plus its largest variant
+
+The last thing I did was measure them, and this is where it clicked:
+
+```rust
+use std::mem;
+
+enum A { a, b, c }
+println!("size {}", mem::size_of::<A>());   // 1
+```
+
+Rust's enum is a **tagged union**: memory = a discriminant tag + enough room for the biggest payload. Three payload-free variants need only enough tag to tell three things apart, so one byte does it.
+
+The measurements, all checked with `size_of`:
+
+| Enum | Size | Why |
+|---|---|---|
+| `enum A { a, b, c }` | 1 | Tag only, 3 cases fit in a byte |
+| `enum One { A = 255 }` | **0** | One variant → the value carries no information |
+| `enum Mixed { A(u8), B(u32) }` | 8, align 4 | Not 5 — the `u32` forces padding |
+| `enum Never {}` | 0 | No values exist at all |
+
+The zero-byte one is worth sitting with. A single-variant enum is a **ZST**, and even pinning the discriminant to `255` doesn't change it: if a type has exactly one possible value, then knowing "which value is it" tells you nothing, so there is nothing to store. The compiler doesn't keep a tag it could never learn anything from.
+
+And the padding case is the one that will bite in real code. `Mixed` is 8 bytes, not 5:
+
+```text
+offset:  0        1  2  3        4  5  6  7
+        [ tag ] [ 3 bytes pad ] [    u32    ]
+```
+
+The `u32` must sit on a 4-byte boundary, so alignment inserts three invisible bytes after the tag.
+
+## The tag can be free
+
+One thing I checked myself after the video, because the ZST result made me curious:
+
+```rust
+enum Big { A(String), B }
+size_of::<Big>()      // 24 — exactly size_of::<String>()
+size_of::<Option<&i32>>()  // 8 — exactly size_of::<&i32>()
+```
+
+No room for a tag anywhere, and yet both work. This is **niche optimization**: a `String` holds a pointer that can never be null, so the compiler uses the null bit-pattern to mean `B`. Same for `Option<&T>` — `None` *is* the null pointer.
+
+Which closes the loop on the null-pointer story. Rust didn't trade safety for cost here. `Option<&T>` is byte-for-byte a nullable pointer, exactly what C would have written — the difference is only that the compiler now refuses to let you dereference it without checking.
+
+## Practice
+
+None today. Enums and structs share a crate this time, so the exercise set waits until struct is done and then covers both at once.
+
+Tomorrow: structs.
