@@ -1,0 +1,207 @@
+---
+title: "Day 5.5 · Patterns — Match Branches on Shape, Not on Value"
+pubDate: "2026-08-11"
+author: "Roddy"
+description: "A half-day going back over match properly. Struct is AND, enum is OR, and a pattern destructures the OR. Plus @ bindings, guards that silently stop firing if you order them wrong, and the ref mut that lets you edit a String inside an enum without moving it out."
+categories: ['rust']
+---
+
+# Day 5.5 · Patterns
+
+A catch-up half-day. Day 5 taught me `match` well enough to use it, and then Day 6 kept handing me situations it couldn't express. So this one goes back and takes the **pattern** apart rather than the `match`.
+
+The reframe that made it click is one I ended up writing in the margin:
+
+> `struct` 表达「同时拥有这些东西」(AND) · `enum` 表达「只能是这些可能性之一」(OR)
+
+A struct says *and*, an enum says *or*, and a pattern is how you interrogate the *or*. Which means `match` isn't really a replacement for if-else — it branches on **shape**, and if-else can only branch on a boolean.
+
+> Today's code: [`day5.5/more_match/`](https://github.com/RoddyH17/rust_learn/tree/main/day5.5/more_match) · Notes: [`day5.5/NOTES.md`](https://github.com/RoddyH17/rust_learn/blob/main/day5.5/NOTES.md)
+
+## The example that makes the point
+
+```rust
+enum OrderStatus {
+    Pending,
+    Filled { execution_price: f64, quantity: f64 },
+    Canceled { reason: String },
+}
+```
+
+An order is exactly one of these, and each case carries different data. There is no boolean to test here — the question isn't "is it filled?", it's "which one is it, and what came with it?" That's the question `match` answers and `if` can't.
+
+## Patterns, in order of how much they surprised me
+
+Literals first, which is what I already knew:
+
+```rust
+match y {
+    "Hello" => println!("Hello"),
+    _ => println!("Other!"),
+}
+```
+
+Then `@`, which **checks a pattern and binds the whole matched value at the same time**:
+
+```rust
+match x {
+    var @ 42 => println!("The value of x is {}", var),
+    _ => println!("Something else"),
+}
+```
+
+On a bare literal that's not very useful — you already know it's 42. It earns its keep with ranges, where the pattern matches a *set* and you still want the specific value:
+
+```rust
+match x {
+    n @ 1..=10 => println!("{} 在 1 到 10 之间", n),
+    _ => println!("不在范围内"),
+}
+```
+
+And it nests, binding the whole variant rather than the payload:
+
+```rust
+match Message::Number(8) {
+    whole @ Message::Number(1..=10) => println!("匹配到完整结构:{:?}", whole),
+    _ => {}
+}
+```
+
+`whole` here is the `Message`, not the `8`. Structs destructure the same way, and you can mix bindings with literals field by field:
+
+```rust
+match p {
+    Point { x, y: 0 } => println!("on the x axis at {}", x),
+    Point { x: 0, y } => println!("on the y axis at {}", y),
+    Point { x, y }    => println!("on neither axis: {}, {}", x, y),
+}
+```
+
+`y: 0` is a test, `x` is a binding, in the same pattern. That's the whole idea in one line: you describe the shape you're looking for, and name the parts you want out of it.
+
+## Guards, and the one that fails quietly
+
+A guard bolts a computed condition onto a pattern:
+
+```rust
+match x {
+    n if n % 2 == 0 => println!("Even"),
+    _ => println!("Odd"),
+}
+```
+
+Useful when the thing you care about isn't expressible as a shape. But it introduces the trap I'd rank as the most dangerous thing I learned this week, because of *how* it fails.
+
+Suppose you want large fills reported differently:
+
+```rust
+match &order.status {
+    OrderStatus::Filled { execution_price, .. } => format!("成交 @ {}", execution_price),
+    OrderStatus::Filled { execution_price, quantity } if *quantity >= 100.0 =>
+        format!("大额成交 @ {}", execution_price),
+    // ...
+}
+```
+
+The guarded arm never fires. `match` is top-to-bottom, first match wins, and the unguarded `Filled` above it already matches everything. The compiler notices:
+
+```text
+warning: unreachable pattern
+  `OrderStatus::Filled { .. }` matches all the relevant values
+  no value can reach this
+```
+
+**A warning. Not an error.** So it compiles, it runs, and every large fill is silently reported as an ordinary one. Compare with Day 5, where `o => {}` swallowing later arms produced the same warning — same rule, but there it was obviously wrong, and here it looks like working code. Guards go **above** the general case.
+
+## `ref mut`: editing in place instead of moving out
+
+Matching a `String` moves it:
+
+```rust
+let x = String::from("Hello");
+match x {
+    var => println!("{}", var),   // x has been moved into var
+}
+```
+
+Fine until you're recursing, or until you want to modify the thing rather than consume it. `ref` binds a reference instead:
+
+```rust
+match x {
+    ref var => println!("The value of x is {}", var),   // var is &String
+}
+```
+
+and `ref mut` binds a mutable one, which genuinely writes through:
+
+```rust
+let mut x = String::from("Hello");
+match x {
+    ref mut var => {
+        *var = String::from("world");
+        println!("{}", var);
+    }
+}
+println!("{}", x);   // world
+```
+
+Where this actually matters is reaching a field *inside* an enum variant that you only have a `&mut` to. Destructure it naively and you get:
+
+```text
+error[E0507]: cannot move out of `self.status.reason` as enum variant `Canceled`
+              which is behind a mutable reference
+```
+
+Worth noticing that this is **not** the same error as Day 6's partial move on `..user1`. That one was `E0382` — using a value after it moved. This is `E0507` — trying to move *out from behind a borrow*. Different failure, and the fix is different too: not cloning, but borrowing in the pattern.
+
+Modern Rust also lets you write `match &mut self.status { ... }` and match ergonomics makes the bindings mutable references for you. Both work; the `&mut`-on-the-scrutinee form is what you'll see more often now.
+
+## `if let`, `while let`
+
+When only one case matters, the full `match` is ceremony:
+
+```rust
+let opt = Some(5);
+if let Some(x) = opt {
+    println!("Matched {:?}", x);
+}
+
+let mut iter = vec![1, 2, 3].into_iter();
+while let Some(x) = iter.next() {
+    println!("matched {:?}", x);
+}
+```
+
+`while let Some(x) = v.pop()` is the pairing to remember — `pop` returns `Option`, so the loop ends by itself when the collection empties. No length check, no index.
+
+## Iterators are lazy (a detour that paid off)
+
+Reading `zip`'s signature made this concrete:
+
+```rust
+fn zip<U>(self, other: U) -> Zip<Self, U::IntoIter>
+where Self: Sized, U: IntoIterator
+{
+    Zip::new(self, other.into_iter())
+}
+```
+
+It doesn't zip anything. It returns a `Zip` struct that itself implements `Iterator`. **Nothing computes until something demands an element**, which splits the whole API in two:
+
+| | Examples | What it does |
+|---|---|---|
+| Adapter | `map` `filter` `zip` `skip` | Builds the pipeline |
+| Consumer | `next` `collect` `sum` `for` | Actually drives it |
+
+Call `map` and throw away the result and you've done no work at all — you built a pipe and dropped it.
+
+## Practice: a mini project instead of exercises
+
+The exercise set for this one is a **mini project**, and it's also the combined struct + enum set I'd been owing myself since Day 5: [an order engine](https://github.com/RoddyH17/rust_learn/blob/main/day5.5/more_match/examples/practice.rs), eight stages, about a hundred lines to write.
+
+It builds the `OrderStatus` enum from the top of this post for real — two enums with all three variant shapes, an `Order` struct, an `impl` block with an associated function and three methods, then the pattern work: `ref mut` to append to a cancellation reason in place, a `classify` whose four rules only fit three variants because one is a guard, `@` range bindings, and a `settle` that drains a queue with `while let` + `if let`.
+
+Stage 7 is the one I'm most curious to get wrong: a `Describe` trait implemented for both `Order` and an unrelated `Account`, then printed from a single slice holding both. That slice forces `&[&dyn Describe]` — `impl Trait` is static dispatch, so it monomorphises to one concrete type, and a slice needs all elements to be that same type. Heterogeneous collection, vtable, no way around it. Exactly the `&impl` / `&dyn` trade-off from Day 6, but arrived at from the other direction.
+
+Tomorrow: generics — which is the same static-dispatch machinery, named properly.
