@@ -281,7 +281,9 @@ def load_meta():
 
 
 CHAPTER_RE = re.compile(r"chapter\s*(\d+)", re.I)
-DAY_RE = re.compile(r"day\s*(\d+)", re.I)
+# 半天(Day 5.5 这类补课日)是独立的一天,有自己的目录、笔记、博客和 Notion 页。
+# 只抓整数会把 "Day5.5" 读成 5,和 Day 5 撞成同一个日号,_find_day 直接报重号退出。
+DAY_RE = re.compile(r"day\s*(\d+(?:\.\d+)?)", re.I)
 
 # 直接挂在 System III 下的日页归第 1 章 —— 这是当前的实际布局(Chapter 1 只是父页
 # 正文里的一个标题,没有单独成页)。以后 Chapter 2 会单独建页,日页挂在它下面。
@@ -290,7 +292,11 @@ DEFAULT_CHAPTER = 1
 
 def day_of(title):
     m = DAY_RE.search(title)
-    return int(m.group(1)) if m else None
+    if not m:
+        return None
+    raw = m.group(1)
+    # 整天保持 int,这样 f"day{day}" 仍然是 day5 而不是 day5.0。
+    return float(raw) if "." in raw else int(raw)
 
 
 def discover():
@@ -701,7 +707,10 @@ def _audit_one(day):
         if confs is None:
             print("  debug     ⚠️  .vscode/launch.json 不是合法 JSON")
         else:
-            mine = [c for c in confs if re.search(rf"Day {day}\b", c.get("name", ""))]
+            # \b 会让 "Day 5" 命中 "Day 5.5 · more_match"(5 和 . 之间就是词边界),
+            # 于是半天的配置被算进整天里,报出假的包名不符。禁掉后面跟数字或小数点。
+            pat = rf"Day {re.escape(str(day))}(?![\d.])"
+            mine = [c for c in confs if re.search(pat, c.get("name", ""))]
             if not mine:
                 print(f"  debug     ❌  launch.json 里没有 Day {day} 的配置")
             else:
@@ -733,11 +742,15 @@ def _audit_one(day):
         with open(prac) as f:
             body = f.read()
         # 数**不重复的**题号 —— 正文和注释里会多次引用同一题(如「Exercise 3(b)」、
-        # 「Exercise 7 / 8」),按出现次数数会虚高
+        # 「Exercise 7 / 8」),按出现次数数会虚高。
+        # mini project 用 Stage 分段而不是 Exercise,不认它会把整份练习报成 0 题。
         n_ex = len(set(re.findall(r"Exercise\s+(\d+)", body)))
+        n_st = len(set(re.findall(r"Stage\s+(\d+)", body)))
+        unit = "题" if n_ex >= n_st else "个 Stage"
+        n_ex = max(n_ex, n_st)
         mark, msg = _cargo(crate, "--example", "practice")
         todo = "(还是 TODO 骨架)" if "Exercise 1: TODO" in body else ""
-        print(f"  practice  {mark}  {n_ex} 题{todo} — {msg}")
+        print(f"  practice  {mark}  {n_ex} {unit}{todo} — {msg}")
 
     # --- Notion(中介层,不再是权威)---------------------------------------
     page = _find_day(day)
@@ -764,9 +777,15 @@ def _audit_one(day):
         print(f"  NOTES.md  ❌  day{day}/NOTES.md 不存在")
 
     # --- blog -------------------------------------------------------------
-    posts = sorted(glob.glob(os.path.join(BLOG_POSTS, f"day-{day}-*.md*")))
+    # 文件名里小数点写成连字符:day5.5 → day-5-5-*.mdx。
+    # 但这样 day-5-* 会把 day-5-5-pattern-matching.mdx 也捞进 Day 5,所以紧跟前缀
+    # 的那一段不能再是数字 —— 那是下一个半天,不是这一天的正文。
+    prefix = "day-" + str(day).replace(".", "-")
+    slug_re = re.compile(rf"^{re.escape(prefix)}-(?!\d+-)\S*\.mdx?$")
+    posts = sorted(p for p in glob.glob(os.path.join(BLOG_POSTS, f"{prefix}-*.md*"))
+                   if slug_re.match(os.path.basename(p)))
     if not posts:
-        print(f"  blog      ❌  {BLOG_POSTS}/day-{day}-*.mdx 不存在")
+        print(f"  blog      ❌  {BLOG_POSTS}/{prefix}-*.mdx 不存在")
     for p in posts:
         with open(p) as f:
             head = f.read(600)
@@ -776,9 +795,10 @@ def _audit_one(day):
 
 
 def cmd_audit(arg=None):
-    # 以文件系统为准枚举天数 —— 源头是 dayN 目录,不是 Notion
-    days = sorted(int(m.group(1))
-                  for m in (re.match(r"day(\d+)$", os.path.basename(p))
+    # 以文件系统为准枚举天数 —— 源头是 dayN 目录,不是 Notion。
+    # 半天(day5.5/)也是独立的一天,要单独出一行,所以日号可能是小数。
+    days = sorted(float(m.group(1)) if "." in m.group(1) else int(m.group(1))
+                  for m in (re.match(r"day(\d+(?:\.\d+)?)$", os.path.basename(p))
                             for p in glob.glob(os.path.join(RUST_LEARN, "day*")))
                   if m)
     if not days:
