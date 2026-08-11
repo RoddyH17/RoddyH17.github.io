@@ -1,0 +1,253 @@
+---
+title: "Day 6 · Structs and Traits — OOP Taken Apart Into Three Pieces"
+pubDate: "2026-08-11"
+author: "Roddy"
+description: "Rust has no classes and no inheritance. A struct is data, impl attaches behaviour, and a trait is behaviour shared across unrelated types. Plus the mut self that silently eats your object, why Debug derives but Display doesn't, and why one function takes &impl Shape instead of two concrete parameters."
+categories: ['rust']
+---
+
+# Day 6 · Structs and Traits
+
+Every OO language I've used bundles three things into one keyword. A `class` holds data, attaches behaviour to that data, and declares what the type can be substituted for — all at once, and inheritance stitches them together.
+
+Rust has no `class` and no inheritance. It has those three things as three separate features: a **struct** is data, an **`impl` block** attaches behaviour, and a **trait** is behaviour shared across types that have nothing else in common. Today was mostly about noticing that the seam between them is deliberate.
+
+> Today's code: [`day6/oop_basic/`](https://github.com/RoddyH17/rust_learn/tree/main/day6/oop_basic) · Notes: [`day6/NOTES.md`](https://github.com/RoddyH17/rust_learn/blob/main/day6/NOTES.md)
+
+## A struct is only data
+
+```rust
+struct User {
+    active: bool,
+    username: String,
+    email: String,
+    sign_in_count: u64,
+}
+```
+
+Every field must be initialised — there are **no default values** — but the order at the construction site is free, since fields are named:
+
+```rust
+let user1 = User {
+    email: String::from("someone@example.com"),
+    username: String::from("someoneusername123"),
+    active: true,
+    sign_in_count: 1,
+};
+```
+
+And as in JavaScript, when a local variable already has the field's name, you can drop the repetition:
+
+```rust
+let user1 = User { email, username, active: true, sign_in_count: 1 };
+```
+
+## `mut` belongs to the binding, not the field
+
+```rust
+let mut user1 = User { /* ... */ };
+user1.email = String::from("another@example.com");   // fine
+```
+
+What surprised me is that there is no way to mark *one* field as writable. Mutability in Rust is a property of **the binding**, so it's all or nothing:
+
+```rust
+let r3 = Rectangle { width: 1, height: 1 };
+r3.width = 5;
+// error[E0594]: cannot assign to `r3.width`, as `r3` is not declared as mutable
+```
+
+Which follows from the borrowing rules rather than being a separate decision: `&mut` gives exclusive access to a whole value, so "mutable" can't be finer-grained than the thing you hand out a reference to.
+
+## Struct update syntax is a *move*, not a copy
+
+The shorthand for "same as that one, except…" is `..`:
+
+```rust
+let user2 = User {
+    email: String::from("another@example.com"),
+    ..user1
+};
+```
+
+I read this as copying the remaining fields. It isn't — it **moves** them, field by field, and the compiler tracks it at that granularity:
+
+```rust
+println!("{}", user1.active);     // ✅ still fine — bool is Copy
+println!("{}", user1.username);   // ❌ error[E0382]: borrow of moved value: `user1.username`
+```
+
+So `user1` isn't dead as a whole; it's **partially moved**. The `Copy` fields survive, the `String` fields have left, and the compiler knows exactly which is which. This is Day 3's move semantics applied per field — and the reason a struct with one moved-out field can no longer be passed or assigned as a whole.
+
+## Holding a `&str` in a struct needs a lifetime
+
+My first version stored string slices, and it wouldn't compile without an annotation:
+
+```rust
+struct User<'a> {
+    active: bool,
+    username: &'a str,
+    email: &'a str,
+    sign_in_count: u64,
+}
+```
+
+The struct doesn't own those bytes — it borrows them. So it needs to promise it won't outlive whatever it's pointing at, and `'a` is that promise written down. Store `String` instead and the problem disappears, because then the struct owns the data.
+
+## Two more shapes
+
+```rust
+struct Point(i32, i32, i32);   // tuple struct — named type, unnamed fields
+struct AlwaysEqual;            // unit struct — no fields at all
+
+let origin = Point(0, 1, 2);
+println!("{}", origin.0);
+let subject = AlwaysEqual;
+```
+
+A tuple struct is for when the *type* deserves a name but the fields don't — `Point` beats a bare `(i32, i32, i32)` because the compiler will now stop you passing a colour where a coordinate belongs. A unit struct is for when you don't care about the data at all, only about the behaviour you're going to attach to it.
+
+## `impl` is the same distinction as yesterday
+
+```rust
+impl Rectangle {
+    fn new(width: u32, height: u32) -> Rectangle {   // associated function
+        Rectangle { width, height }
+    }
+    fn area(&self) -> u32 {                          // method
+        self.width * self.height
+    }
+}
+
+let rect3 = Rectangle::new(10, 30);
+println!("{}", rect3.area());
+```
+
+Exactly the rule from Day 5's enums: **with `self` it's a method, called with `.`; without `self` it's an associated function, called with `::`**. Nothing about this is struct-specific, which is the point — `impl` attaches behaviour to a type, and it does not care whether that type is a struct or an enum.
+
+You *could* write `fn new(...) -> Rectangle` as a free function and it would work. Putting it in the `impl` block is what makes it `Rectangle::new` instead of a loose function that happens to return one — organisation, and a namespace.
+
+## The `mut self` that ate my rectangle
+
+This one cost me the most time today:
+
+```rust
+impl Rectangle {
+    fn set_width(mut self, new_width: u32) {
+        self.width = new_width;
+    }
+}
+
+let rect2 = Rectangle { width: 20, height: 30 };
+rect2.set_width(10);
+```
+
+It compiles. It also does nothing, and it destroys `rect2` on the way. `mut self` means **take ownership of the receiver, and let me mutate my own copy** — so the method got the whole rectangle, changed its private version, and dropped it at the end of the body. Try to use `rect2` afterwards:
+
+```text
+error[E0382]: borrow of moved value: `rect2`
+  `rect2` moved due to this method call
+```
+
+What I wanted was a mutable borrow:
+
+```rust
+fn set_width(&mut self, new_width: u32) {
+    self.width = new_width;
+}
+
+let mut rect2 = Rectangle { width: 20, height: 30 };
+rect2.set_width(10);   // rect2 is still alive, and actually changed
+```
+
+The receiver has three forms and they are three different contracts: `self` consumes, `&self` reads, `&mut self` modifies in place. `mut self` looks like the third and behaves like the first.
+
+## `Debug` derives, `Display` does not
+
+```rust
+#[derive(Debug)]
+pub struct Rectangle { width: u32, height: u32 }
+
+println!("rect is {:?}", rect);    // one line
+println!("rect is {:#?}", rect);   // pretty-printed, one field per line
+dbg!(&rect);                       // prints file:line too, and returns the value
+```
+
+`{}` is a different trait, and there is deliberately no `#[derive(Display)]`: how a type should look to a *user* is a judgement no macro can make for you. So you write it:
+
+```rust
+impl std::fmt::Display for Rectangle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for _ in 0..self.height {
+            let mut s = String::new();
+            for _ in 0..self.width {
+                s.push('#');
+            }
+            writeln!(f, "{}", s)?;
+        }
+        Ok(())
+    }
+}
+```
+
+`println!("{}", rect4)` now draws the rectangle as a block of `#`. Which is the argument for the split: `Debug` is for me, `Display` is for whoever is reading the output, and they're rarely the same string.
+
+## Traits: shared behaviour, not a shared parent
+
+```rust
+trait Shape {
+    fn area(&self) -> f64;
+}
+
+impl Shape for Rectangle {
+    fn area(&self) -> f64 { (self.width as f64) * (self.height as f64) }
+}
+
+impl Shape for Circle {
+    fn area(&self) -> f64 { std::f64::consts::PI * self.r * self.r }
+}
+```
+
+A trait is a set of behaviours that a type must provide in order to claim it. `Rectangle` and `Circle` share no data, no parent, no memory layout — only the fact that both can answer `area()`.
+
+Calling it "Rust's interface" is close enough to start with, but it undersells one thing: a trait can be implemented for types you didn't write. There is no base class to insert yourself into, so "does this type qualify" is answered by a standalone `impl` block rather than by the type's own definition.
+
+## Why one parameter and not two
+
+I left myself this question in the margin — *why not write `print_area(rectangle: &Rectangle, circle: &Circle)`?*
+
+```rust
+fn print_area(shape: &impl Shape) {
+    println!("{}", shape.area());
+}
+```
+
+Because the two-parameter version answers the wrong question. It hardcodes *which types exist*, so every new shape means a new parameter or a new overload. `&impl Shape` says "anything that can tell me its area", and the set of such types stays open — add `Triangle` tomorrow, and `print_area` already works.
+
+And it costs nothing at runtime. `&impl Shape` is **static dispatch**: the compiler generates a separate specialised copy of `print_area` for each concrete type you actually call it with, so the call is direct. The alternative, `&dyn Shape`, does the lookup at runtime through a vtable — which you want when the types must be decided while the program is running, and don't when they don't.
+
+## Two bugs the compiler caught in today's code
+
+Both worth writing down, because neither is a typo:
+
+**1. A `Result` I dropped on the floor.** Inside `fmt` I wrote `write!(f, "{}\n", s);` and got `warning: unused Result that must be used`. Writing can fail, so `write!` returns a `Result` — and a warning here means a real error would vanish silently. `writeln!(f, "{}", s)?;` fixes both that and the manual `\n`.
+
+**2. An overflow hiding behind a cast.** I first wrote:
+
+```rust
+fn area(&self) -> f64 { (self.width * self.height) as f64 }
+```
+
+The multiplication happens in `u32` and only *then* becomes `f64`. With a 100000 × 100000 rectangle that's `attempt to multiply with overflow` — a panic in debug, and a silently wrong number in release. Cast first, multiply second:
+
+```rust
+fn area(&self) -> f64 { self.width as f64 * self.height as f64 }
+```
+
+I also had `3.14` sitting in the circle. `std::f64::consts::PI` is right there and is correct to the last bit.
+
+## Practice
+
+None today either — the material was direct enough that reading it was the exercise. Structs and enums still owe me one combined set, and that's the next thing to build.
+
+Tomorrow: generics.
