@@ -1,6 +1,5 @@
 ---
-// Learning-log widgets for the right column: a contribution heatmap ("Toxicity")
-// and a mood-tag histogram ("Mood Spread").
+// Learning-log widget for the right column: a contribution heatmap.
 //
 // The heatmap lights a cell for ANY published day — every posts category plus
 // research notes, not just the Rust series. It used to filter on
@@ -8,23 +7,21 @@
 // output was a crypto post or a research note (2026-08-05 was blank despite
 // the Uniswap note shipping that day).
 //
-// Mood tags (zen = calm / sorge = frustrated / frage = unresolved question) only
-// exist on the daily Rust posts. A day without them still lights, at the neutral
-// 0.5 opacity — publishing is what lights the cell; mood only sets the shade.
-// Moods are shown ONLY in aggregate here — never attached to a specific post.
+// Mood was dropped 2026-08-11: it used to add a "Mood Spread" histogram and to
+// set each cell's shade (zen < frage < sorge). Every lit cell now uses the same
+// opacity — publishing is the only thing the grid reports. The `mood` field is
+// still allowed in frontmatter (it's a private authoring tag), it just isn't
+// rendered anywhere.
 // Colors use only the theme variables, so light/dark mode works automatically.
 import { getCollection } from 'astro:content'
 
 const posts = await getCollection('posts', ({ data }) => !data.draft)
 const research = await getCollection('research', ({ data }) => !data.draft)
 
-type Mood = 'zen' | 'sorge' | 'frage'
-
 interface DayLog {
   date: Date
   dayNum: number | null
   titles: string[]
-  moods: Mood[]
 }
 
 // Frontmatter dates are UTC midnight, so read them with UTC accessors;
@@ -33,32 +30,30 @@ const dateKey = (d: Date) =>
   `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
 
 const published = [
-  ...posts.map((p) => ({ date: p.data.pubDate, title: p.data.title, moods: (p.data.mood ?? []) as Mood[] })),
-  ...research.map((r) => ({ date: r.data.pubDate, title: r.data.title, moods: [] as Mood[] })),
+  ...posts.map((p) => ({ date: p.data.pubDate, title: p.data.title })),
+  ...research.map((r) => ({ date: r.data.pubDate, title: r.data.title })),
 ]
 
 // Group by day, because more than one thing can ship on the same date and a day
 // only has one cell. Merging (rather than overwriting) keeps every title in the
-// tooltip and unions the moods.
+// tooltip.
 const byDate = new Map<string, DayLog>()
 for (const item of published) {
   const key = dateKey(item.date)
-  const log = byDate.get(key) ?? { date: item.date, dayNum: null, titles: [], moods: [] }
+  const log = byDate.get(key) ?? { date: item.date, dayNum: null, titles: [] }
   log.titles.push(item.title)
-  for (const m of item.moods) {
-    if (!log.moods.includes(m)) log.moods.push(m)
-  }
-  const dayMatch = item.title.match(/Day\s+(\d+)/i)
+  // Half-days are their own day (Day 5.5 is not Day 5), so the fraction has to
+  // be part of the capture — `\d+` alone reads "Day 5.5" as 5 and mislabels the
+  // cell. Same prefix collision the pipeline audit hit.
+  const dayMatch = item.title.match(/Day\s+(\d+(?:\.\d+)?)/i)
   if (dayMatch) log.dayNum = Number(dayMatch[1])
   byDate.set(key, log)
 }
 
-const logs: DayLog[] = [...byDate.values()].sort((a, b) => a.date.getTime() - b.date.getTime())
-
-// ---------- 1. Toxicity heatmap: last 12 weeks, Sunday-first columns ----------
-// Cell darkness = the most "toxic" mood of the day: zen < frage < sorge.
-const TOX_ALPHA: Record<Mood, number> = { zen: 0.35, frage: 0.65, sorge: 1 }
-const dayAlpha = (l: DayLog) => (l.moods.length ? Math.max(...l.moods.map((m) => TOX_ALPHA[m])) : 0.5)
+// ---------- Heatmap: last 12 weeks, Sunday-first columns ----------
+// One opacity for every published day. This is the value a mood-less day already
+// used, so days that never carried a tag look exactly as they did before.
+const LIT_ALPHA = 0.5
 
 const WEEKS = 12
 const PITCH = 16
@@ -85,7 +80,7 @@ for (let w = 0; w < WEEKS; w++) {
     cells.push({
       x: w * PITCH,
       y: d * PITCH,
-      alpha: log ? dayAlpha(log) : null,
+      alpha: log ? LIT_ALPHA : null,
       // Rust days are identified by number. Anything else — and any extra item
       // shipped the same day — is named by title, so a lit cell always says
       // what was actually published rather than silently hiding a second post.
@@ -94,7 +89,6 @@ for (let w = 0; w < WEEKS; w++) {
             log.dayNum ? `Day ${log.dayNum}` : null,
             dateKey(date),
             log.dayNum && log.titles.length === 1 ? null : log.titles.join(' + '),
-            log.moods.length ? log.moods.join(' + ') : null,
           ]
             .filter(Boolean)
             .join(' · ')
@@ -104,17 +98,6 @@ for (let w = 0; w < WEEKS; w++) {
 }
 const heatW = WEEKS * PITCH - (PITCH - CELL)
 const heatH = 7 * PITCH - (PITCH - CELL)
-
-// ---------- 2. Mood Spread: how many days carry each tag ----------
-const MOODS: Mood[] = ['zen', 'sorge', 'frage']
-const counts = MOODS.map((m) => ({
-  mood: m,
-  count: logs.filter((l) => l.moods.includes(m)).length,
-}))
-const maxCount = Math.max(...counts.map((c) => c.count), 1)
-const HIST_H = 74
-const BAR_W = 26
-const histX = (i: number) => 14 + i * ((heatW - 28 - BAR_W) / (MOODS.length - 1))
 ---
 
 <aside class="learning-pulse">
@@ -140,58 +123,6 @@ const histX = (i: number) => 14 + i * ((heatW - 28 - BAR_W) / (MOODS.length - 1)
       }
     </svg>
   </section>
-
-  {
-    logs.some((l) => l.moods.length > 0) && (
-      <section>
-        <h3>Mood Spread</h3>
-        <svg viewBox={`0 0 ${heatW} ${HIST_H}`} width="100%" role="img" aria-label="Histogram of mood tags">
-          {counts.map((c, i) => {
-            const h = (c.count / maxCount) * 40
-            return (
-              <g>
-                {c.count > 0 && (
-                  <rect
-                    x={histX(i)}
-                    y={56 - h}
-                    width={BAR_W}
-                    height={h}
-                    fill="var(--uno-colors-primary)"
-                    fill-opacity="0.55"
-                  />
-                )}
-                {c.count > 0 && (
-                  <line
-                    x1={histX(i)}
-                    y1={56 - h}
-                    x2={histX(i) + BAR_W}
-                    y2={56 - h}
-                    stroke="var(--uno-colors-primary)"
-                    stroke-width="1.5"
-                  />
-                )}
-                <text x={histX(i) + BAR_W / 2} y={56 - h - 4} text-anchor="middle" class="count">
-                  {c.count}
-                </text>
-                <text x={histX(i) + BAR_W / 2} y={HIST_H - 2} text-anchor="middle" class="axis">
-                  {c.mood}
-                </text>
-              </g>
-            )
-          })}
-          <line
-            x1="4"
-            y1="56.5"
-            x2={heatW - 4}
-            y2="56.5"
-            stroke="var(--uno-colors-primary)"
-            stroke-opacity="0.35"
-            stroke-width="1"
-          />
-        </svg>
-      </section>
-    )
-  }
 </aside>
 
 <style>
@@ -216,21 +147,6 @@ const histX = (i: number) => 14 + i * ((heatW - 28 - BAR_W) / (MOODS.length - 1)
     opacity: 0.75;
     margin-bottom: 0.6rem;
     font-weight: normal;
-  }
-
-  .learning-pulse .axis {
-    font-size: 8px;
-    fill: var(--uno-colors-primary);
-    fill-opacity: 0.75;
-    font-family: inherit;
-    letter-spacing: 0.08em;
-  }
-
-  .learning-pulse .count {
-    font-size: 8px;
-    fill: var(--uno-colors-primary);
-    fill-opacity: 0.9;
-    font-family: inherit;
   }
 
   .learning-pulse svg {
