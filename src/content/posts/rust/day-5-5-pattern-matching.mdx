@@ -1,8 +1,9 @@
 ---
 title: "Day 5.5 · Patterns — Match Branches on Shape, Not on Value"
 pubDate: "2026-08-11"
+modDate: "2026-08-11"
 author: "Roddy"
-description: "A half-day going back over match properly. Struct is AND, enum is OR, and a pattern destructures the OR. Plus @ bindings, guards that silently stop firing if you order them wrong, and the ref mut that lets you edit a String inside an enum without moving it out."
+description: "A half-day going back over match properly. Struct is AND, enum is OR, and a pattern destructures the OR. Plus @ bindings, guards that silently stop firing if you order them wrong, the ref mut that lets you edit a String inside an enum without moving it out — and my first project-based learning instead of drills."
 categories: ['rust']
 ---
 
@@ -196,12 +197,26 @@ It doesn't zip anything. It returns a `Zip` struct that itself implements `Itera
 
 Call `map` and throw away the result and you've done no work at all — you built a pipe and dropped it.
 
-## Practice: a mini project instead of exercises
+## The first project instead of exercises
 
-The exercise set for this one is a **mini project**, and it's also the combined struct + enum set I'd been owing myself since Day 5: [an order engine](https://github.com/RoddyH17/rust_learn/blob/main/day5.5/more_match/examples/practice.rs), eight stages, about a hundred lines to write.
+This is where the shape of my learning changed. Up to now there had been one mode — watch a video, then do ten unrelated drills. This day got a **project** instead: [an order engine](https://github.com/RoddyH17/rust_learn/blob/main/day5.5/more_match/examples/practice.rs), eleven stages, ~400 lines of my own code, now finished and green.
 
-It builds the `OrderStatus` enum from the top of this post for real — two enums with all three variant shapes, an `Order` struct, an `impl` block with an associated function and three methods, then the pattern work: `ref mut` to append to a cancellation reason in place, a `classify` whose four rules only fit three variants because one is a guard, `@` range bindings, and a `settle` that drains a queue with `while let` + `if let`.
+The difference isn't size. In a drill set, exercise 7 doesn't care what you did in exercise 3. In a project, **every step's output is the next step's input** — pick the wrong shape early and you physically can't write the later part. That pressure is the thing drills can't reproduce.
 
-Stage 7 is the one I'm most curious to get wrong: a `Describe` trait implemented for both `Order` and an unrelated `Account`, then printed from a single slice holding both. That slice forces `&[&dyn Describe]` — `impl Trait` is static dispatch, so it monomorphises to one concrete type, and a slice needs all elements to be that same type. Heterogeneous collection, vtable, no way around it. Exactly the `&impl` / `&dyn` trade-off from Day 6, but arrived at from the other direction.
+It builds the `OrderStatus` enum from the top of this post for real: two enums covering all three variant shapes, an `Order` struct, an `impl` block, then the pattern work — `ref mut` to append to a cancellation reason in place, a `classify` whose four rules only fit three variants because one is a guard, `@` range bindings, a `settle` that drains a queue with `while let` + `if let`, and finally serde: `#[derive(Serialize, Deserialize)]`, the `json!` macro, and a feed parser that returns `Result` rather than panicking.
 
-Tomorrow: generics — which is the same static-dispatch machinery, named properly.
+Stage 7 was the one worth the trouble: a `Describe` trait implemented for both `Order` and an unrelated `Account`, then printed from a single slice holding both. That slice forces `&[&dyn Describe]` — `impl Trait` is static dispatch, so it monomorphises to one concrete type, and a slice needs every element to be that type. Heterogeneous collection, vtable, no way around it. The Day 6 trade-off, arrived at from the other direction.
+
+And the JSON stages closed a loop I hadn't expected. serde's default enum encoding is externally tagged: `Pending` becomes the bare string `"Pending"`, `Filled` becomes `{"Filled": {...}}`. That's the **same tag from Day 5's memory layout** — one byte in memory, one key in JSON. Feed it `"side":"Hold"` and you get `unknown variant`, which is match exhaustiveness pushed all the way out to the data boundary: `match` won't let you skip a variant, serde won't let outside data invent one.
+
+## What I'd be honest about
+
+I finished it, but it isn't a project I wrote unaided. A lot of the annotations in that file came from asking an AI while working, and several parts I still need to review. That's worth writing down rather than glossing over — it's what the first attempt at project-based learning actually looks like, and I'd rather have an accurate record of where I was than a flattering one.
+
+## Next: an order book
+
+The direction from here is trading, strategy, and high-frequency data. First project: a [limit order book and matching engine](https://github.com/RoddyH17/rust_learn/tree/main/projects/orderbook) — the piece every exchange is built around, where resting orders queue by price and each incoming order checks whether it can cross.
+
+Five stages, ~3.5 hours: newtype `Price`/`Qty` (why money is never `f64`), the price-level container, a generic `BookSide<K: Ord>` so one body of code serves both sides of the book, insert/cancel, and matching. The generic isn't decoration — the best bid is the *highest* price and the best ask is the *lowest*, but `BTreeMap` only sorts one way, so `Reverse<Price>` flips one side and suddenly the two sides differ by nothing but a type parameter.
+
+Generics next, then — but arriving as a requirement rather than a chapter heading.
