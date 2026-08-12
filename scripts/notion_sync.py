@@ -794,6 +794,57 @@ def _audit_one(day):
               + ("  — 仍是草稿(draft: true),未上线" if draft else ""))
 
 
+def _audit_project(path):
+    """项目式学习的检查项和 dayN 不同。
+
+    dayN 问的是「下游跟上了没有」;项目问的是「他做到哪一阶段了」。
+    所以既不查 Notion 也不查博客 —— 项目做完才写博客,做的过程中不该被报成缺失。
+    """
+    name = os.path.basename(path)
+    print(f"\n项目 {name}")
+
+    if not os.path.exists(os.path.join(path, "Cargo.toml")):
+        print(f"  ❌  {path}/Cargo.toml 不存在,不是一个 crate")
+        return
+
+    mark, msg = _cargo(path)
+    print(f"  编译      {mark}  {msg}")
+
+    main_rs = os.path.join(path, "src", "main.rs")
+    if not os.path.exists(main_rs):
+        print(f"  阶段      ❌  src/main.rs 不存在")
+        return
+    with open(main_rs) as f:
+        body = f.read()
+
+    # 「在这里写阶段 N:」后面还是空的,就说明这一阶段没动。空的判据是紧跟着
+    # 下一个分隔线或下一个阶段标题,中间没有非注释代码。
+    stages = re.findall(r"^//\s*[=─]*\s*阶段\s*(\d+)\s*·", body, re.M)
+    # 标记整行都要吃掉(含行尾的冒号)—— 否则那个孤零零的「:」会被当成他写的代码,
+    # 每一阶段都会被误报成已完成。标题后面可能还有括号说明,所以用 [^\n]* 收尾。
+    marker = re.compile(r"^//\s*在这里写阶段\s*(\d+)[^\n]*\n", re.M)
+    todo, done = [], []
+    for m in marker.finditer(body):
+        todo.append(m.group(1))
+        seg = re.split(r"^// ═{10,}", body[m.end():], maxsplit=1, flags=re.M)[0]
+        # 段内有非注释、非空白的行 = 他写了东西
+        if any(l.strip() and not l.strip().startswith("//") for l in seg.splitlines()):
+            done.append(m.group(1))
+    if stages:
+        total = len(todo) or len(set(stages))
+        print(f"  阶段      {'✅' if done else '⚪'}  {len(done)}/{total} 已动手"
+              + (f"(已写:{', '.join(done)})" if done else "(还没开始)"))
+
+    # reflection 是这套项目式学习的核心产物,空着就等于没学
+    blanks = body.count("______")
+    filled_hint = "全部空着" if blanks else "已填完"
+    print(f"  reflection {'⚠️' if blanks else '✅'}  {blanks} 处待填 —— {filled_hint}")
+
+    rel = os.path.relpath(main_rs, RUST_LEARN)
+    if _git_tracked(RUST_LEARN, rel) is False:
+        print(f"            └─ ⚠️ 未被 git 追踪(存在但没提交)")
+
+
 def cmd_audit(arg=None):
     # 以文件系统为准枚举天数 —— 源头是 dayN 目录,不是 Notion。
     # 半天(day5.5/)也是独立的一天,要单独出一行,所以日号可能是小数。
@@ -812,6 +863,13 @@ def cmd_audit(arg=None):
 
     for m in days:
         _audit_one(m)
+
+    # 项目和天是两回事:天是「看视频学了什么」,项目是「用学过的东西造了什么」,
+    # 跨多天、没有 Notion 日页、也没有 examples/practice.rs。不并进 dayN 的检查里。
+    if not arg:
+        for p in sorted(glob.glob(os.path.join(RUST_LEARN, "projects", "*"))):
+            if os.path.isdir(p):
+                _audit_project(p)
 
     # 父页正文里还没被任何一天认领的内容 —— 最容易被忽略的一种漏
     root = next((m for m in load_meta().values() if m.get("kind") == "root"), None)
