@@ -1,0 +1,219 @@
+---
+title: "Day 7 · Vec and HashMap — Two Containers, One Rule for Getting Things Out"
+pubDate: "2026-08-11"
+author: "Roddy"
+description: "A Vec stores things by position and a HashMap stores them by name, but both answer get() with an Option — so an index that ran off the end and a key that was never there are the same kind of event. Plus capacity is not length, insert hands you back what it displaced, and a method call that compiles, warns about nothing, and does nothing at all."
+categories: ['rust']
+---
+
+# Day 7 · Vec and HashMap
+
+Two collections today. A `Vec` stores things **by position**, a `HashMap` stores them **by name**. They have nothing in common structurally — one is a contiguous run of memory, the other is a hash table — and I expected to learn them as two separate sets of methods.
+
+They do share one thing, and it turned out to be the whole point of the day: **`get` returns an `Option` on both**. An index that ran off the end of a `Vec` and a key that was never in a `HashMap` are, as far as the type system is concerned, the same event.
+
+> Today's code: [`day7/data-structure-cookbook/`](https://github.com/RoddyH17/rust_learn/tree/main/day7/data-structure-cookbook) · Notes: [`day7/NOTES.md`](https://github.com/RoddyH17/rust_learn/blob/main/day7/NOTES.md)
+
+## Making one
+
+```rust
+let empty: Vec<i32> = Vec::new();
+let v = vec![1, 2, 3, 4, 5];
+```
+
+The type annotation on the first line isn't optional. `Vec::new()` produces a vector with nothing in it, so there is no element for the compiler to infer an element type from — you have to say. The `vec![]` macro doesn't need it because the literals are right there.
+
+Adding to it requires `mut`, which is the same rule as everywhere else: `push` changes the vector, so the binding has to admit that it can change.
+
+```rust
+let mut nums: Vec<i32> = Vec::new();
+nums.push(1);
+```
+
+## Indexing panics, `get` doesn't
+
+Two ways to read an element. The difference in syntax is trivial; the difference in failure is not.
+
+```rust
+let third: &i32 = &v[2];   // &i32
+v.get(2)                   // Option<&i32>
+```
+
+Go past the end with `&v[100]` and the program dies on the spot — `index out of bounds`, panic, done. Go past the end with `v.get(100)` and you get `None`.
+
+```rust
+match v.get(100) {
+    Some(n) => println!("{}", n),
+    None => println!("nothing there"),
+}
+```
+
+What I like about this is that it isn't a safety feature bolted on top. `get` returns `Option` because "might not be there" is genuinely part of what the function does, and putting that in the return type means the compiler will not let me forget the case. Indexing is the version that assumes I've already proven the index is good — which is a fine thing to assume when I computed the index myself, and a terrible one when it came from a user.
+
+## Iterating borrows, and `*` is the price of writing
+
+```rust
+for i in &v {
+    println!("{}", i);
+}
+```
+
+The `&` is doing real work. Without it the loop takes ownership of the vector, and when the loop ends, so does the vector — the next line that mentions `v` won't compile. Writing needs the mutable version:
+
+```rust
+for i in &mut v {
+    *i += 10;
+}
+```
+
+Now `i` is a `&mut i32`, not an `i32`. It's a reference *to* the slot, so assigning through it needs `*` to say "the thing at the other end of this, not the reference itself." A small piece of syntax that stops being annoying once you read it as a question of which of the two things you meant.
+
+## One `Vec`, three types
+
+A vector requires every element to have the same type. So this looks impossible:
+
+```rust
+let row = vec![3, 10.12, "hello"];   // no
+```
+
+The fix isn't to escape the rule, it's to **satisfy** it — wrap the three shapes in one enum, and now they *are* one type:
+
+```rust
+enum SpreadsheetCell {
+    Int(i32),
+    Float(f64),
+    Text(String),
+}
+
+let row: Vec<SpreadsheetCell> = vec![
+    SpreadsheetCell::Int(3),
+    SpreadsheetCell::Float(10.12),
+    SpreadsheetCell::Text(String::from("hello")),
+];
+```
+
+Getting them back out is a `match`, which is Day 5 again. The division of labour is neat: unifying the type happens at compile time, and picking the branch happens at run time. The vector never knows there were three things in there.
+
+## `capacity` is not `len`
+
+```rust
+let mut v: Vec<i32> = Vec::with_capacity(3);
+// len = 0, capacity = 3
+```
+
+Zero elements, three reserved slots. `len` is how many you put in; `capacity` is how many places you've already asked for. Reserving ahead means `push` doesn't have to stop and find a bigger piece of memory and copy everything over.
+
+And when it does run out, it doesn't add one slot:
+
+```text
+push 3 -> len = 3, capacity = 3
+push 4 -> len = 4, capacity = 6
+```
+
+It doubles. Which is the reason `push` is cheap on average — growing by a constant factor means the number of times you ever have to move the data is logarithmic in the number of elements, so the copying cost spread across all the pushes comes out to a constant each.
+
+## Hashing, and why collisions don't break anything
+
+A `HashMap` runs the key through a hash function to get a number, and that number says where to look. That's where O(1) comes from — you don't search, you compute the address.
+
+```rust
+println!("{}", calculate_hash(&key1));   // 432334484231585307
+println!("{}", calculate_hash(&key2));   // 14542873464920043883
+```
+
+Two different keys, two different hashes. But it doesn't follow that this always happens, and it can't: a hash is a fixed number of bits and there is no limit on how many keys you might have, so eventually two of them land on the same number. That's not a bug to be fixed, it's arithmetic.
+
+What saved me from worrying about it is realising the map's correctness never depended on collisions not happening. Keys that collide end up in the same bucket and then get **compared for real**. The hash narrows the search down to almost nothing; equality does the actual deciding. All a good hash function has to do is make "almost nothing" stay almost nothing.
+
+## `insert` takes the key away from you
+
+```rust
+let field_name = String::from("Favorite color");
+map.insert(field_name, field_value);
+println!("{}", field_name);   // error[E0382]: borrow of moved value
+```
+
+`insert` is declared as `insert(K, V)`, not `insert(&K, &V)` — the map is going to hold onto that key for as long as it exists, so it needs to own it. A `String` isn't `Copy`, so handing it over is a move, and the original binding is spent. Day 3's rules, showing up in a method signature.
+
+```rust
+map.insert(field_name.clone(), field_value.clone());
+println!("{}", field_name);   // fine, at the cost of a copy
+```
+
+Worth noticing that the problem disappears if the keys are `&str` instead of `String`, because a shared reference *is* `Copy`. That isn't free either — it just moves the cost from "duplicate the bytes" to "the map now borrows someone else's data and has to prove it doesn't outlive it."
+
+## Inserting twice is an update, and it gives you back what it displaced
+
+```rust
+scores.insert(String::from("blue"), 10);
+let old = scores.insert(String::from("blue"), 25);
+// old == Some(10)
+```
+
+One key, one value — the second `insert` replaces the first. The part I hadn't thought about is that the old value doesn't just evaporate. It comes back as the return value, wrapped in an `Option` because there might not have been anything there to displace.
+
+## The same rule, on a different container
+
+```rust
+match scores.get("green") {
+    Some(s) => println!("{}", s),
+    None    => println!("no such team"),
+}
+```
+
+This is the `Vec` code from earlier with the words changed. Same `Option`, same `match`, same obligation to say what happens when the answer is "nothing." Two containers built out of completely different machinery, agreeing on how to report absence.
+
+Iterating is the same story too — `for (team, score) in &scores`, with the same `&` for the same reason. One difference worth writing down: the **order is not guaranteed**. Run it twice, get two orders. Don't build anything on it.
+
+## Merging: which map wins?
+
+Two maps, overlapping on `b`:
+
+```rust
+map1 = {a: 1, b: 2}
+map2 = {b: 3, c: 4}
+```
+
+The obvious loop overwrites:
+
+```rust
+for (k, v) in &map2 {
+    merged.insert(*k, *v);
+}
+// {a: 1, b: 3, c: 4}   — map1's b is gone
+```
+
+The other intent — keep what's already there, only fill in gaps — is `entry`:
+
+```rust
+for (k, v) in &map2 {
+    kept.entry(*k).or_insert(*v);
+}
+// {a: 1, b: 2, c: 4}   — b survived, only c is new
+```
+
+Same shape, opposite semantics, and nothing in the syntax warns you which one you wrote. Picking the wrong one is silent data loss.
+
+## The method that compiles, warns about nothing, and does nothing
+
+Here is the actual mistake I made, and it's the one thing from today I most want to remember.
+
+I wrote this, with a comment next to it saying *"insert if absent, leave alone if present"*:
+
+```rust
+scores.entry(String::from("yellow"));
+```
+
+It compiles. No warning. It runs. And it does **absolutely nothing** — I checked, the map is byte-for-byte unchanged.
+
+`entry` doesn't insert. It hands you an `Entry`, which is an enum meaning *"this slot in the map, which is either occupied or vacant."* It's a location, not an action. What actually writes is whatever you say next: `.or_insert(v)`, `.or_insert_with(f)`, `.and_modify(f)`. Drop the `Entry` on the floor and you've described a place and then walked away from it.
+
+The reason this is worth a whole section is that Rust normally *does* stop me. Wrong type, moved value, unused `Result` — the compiler has an opinion about all of them. Here it has none: `Entry` isn't marked `#[must_use]`, so discarding it is, as far as the compiler is concerned, a perfectly reasonable thing to want. There was no signal anywhere. The only thing that was wrong was the answer.
+
+I've been leaning on the compiler as the thing that tells me when I'm confused. Today it politely agreed with a sentence that meant nothing.
+
+## Practice
+
+Six exercises this time, in [`examples/practice.rs`](https://github.com/RoddyH17/rust_learn/blob/main/day7/data-structure-cookbook/examples/practice.rs) — a `get`-instead-of-index drill, a merge that has to preserve the original values, an `E0382` to diagnose and then fix two different ways, summing a column of mixed-type cells, a `capacity` prediction to make before running it, and a word counter that ends up being three lines once you notice that `or_insert` returns `&mut` to the slot itself.
+
+Tomorrow: `String` — the third of the three collections, and the one where "byte" and "character" stop being the same word.
