@@ -8,15 +8,16 @@
   "license": "MIT",
   "repository": "https://github.com/moeyua/astro-theme-typography",
   "scripts": {
-    "dev": "astro check && astro dev",
-    "build": "astro check && astro build",
+    "dev": "npm run activity && astro check && astro dev",
+    "build": "npm run activity && astro check && astro build",
     "preview": "astro preview",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "typecheck": "tsc --noEmit",
     "theme:release": "tsx scripts/release-theme.ts",
     "theme:create": "tsx scripts/create-post.ts",
-    "theme:update": "tsx scripts/update-theme.ts"
+    "theme:update": "tsx scripts/update-theme.ts",
+    "activity": "node scripts/gen-activity.mjs"
   },
   "dependencies": {
     "@astrojs/check": "^0.9.4",

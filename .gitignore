@@ -26,5 +26,11 @@ Markdown style guide.md
 # 管道缓存(Notion 是 source of truth,缓存不入库)
 .cache/
 
+# Toxicity 热力图的 push 数据 —— 由 scripts/gen-activity.mjs 从 git log 生成,
+# 每次 build 重算。入库只会让每次本地构建都脏一个文件,而且 PR 里永远是过期的。
+src/data/activity.json
+# CI 里 rust_learn 的第二个 checkout(见 .github/workflows/deploy.yml)
+.rust_learn/
+
 # Python
 __pycache__/

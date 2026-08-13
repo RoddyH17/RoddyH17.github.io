@@ -4,6 +4,13 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  # The Toxicity heatmap counts commits in rust_learn as well as here, but a push
+  # to rust_learn cannot trigger this workflow (cross-repo dispatch needs a PAT).
+  # A nightly rebuild picks those days up instead, so the grid is at worst one
+  # day behind. 07:10 UTC = 03:10 America/New_York — after the end of a working
+  # day in Roddy's timezone, so a full day is always complete when it runs.
+  schedule:
+    - cron: '10 7 * * *'
 
 permissions:
   contents: read
@@ -18,7 +25,20 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      # fetch-depth: 0 is required, not cosmetic. The default shallow clone hands
+      # `git log` a single commit, and scripts/gen-activity.mjs would then report
+      # one active day — indistinguishable from "he did no work" and exactly the
+      # silent-wrong-answer this feature exists to remove.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # rust_learn is where the learning actually happens, so its commits are
+      # half the heatmap. It is a public repo, so no token is needed.
+      - uses: actions/checkout@v4
+        with:
+          repository: RoddyH17/rust_learn
+          path: .rust_learn
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
