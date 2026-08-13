@@ -582,7 +582,8 @@ def render_day(day, title=None):
             parsed = parse_live_notes(f.read())
 
         head = title or (parsed["narrative"][0] if parsed["narrative"] else f"Day {day}")
-        head = re.sub(r"^Day\s*\d+\s*[—–-]\s*", "", head).strip() or f"Day {day}"
+        # \d+(\.\d+)? —— 半天的标题是「Day 7.5 — option ...」,不带小数的正则剥不掉前缀
+        head = re.sub(r"^Day\s*\d+(?:\.\d+)?\s*[—–-]\s*", "", head).strip() or f"Day {day}"
         out.append(f"# {head}")
 
         rest = [n for n in parsed["narrative"][1:] if n]
@@ -909,9 +910,13 @@ def main():
             raise SystemExit("❌ 用法: notion.sh audit [N]  或  audit <章>.<N>")
         cmd_audit(args[0] if args else None)
     elif cmd == "render":
-        if not args or not args[0].isdigit():
-            raise SystemExit("❌ 用法: notion.sh render <N>")
-        sys.stdout.write(render_day(int(args[0])))
+        # 半天(day5.5/ day7.5/)也是独立的一天,日号可能带小数。
+        # 这里不走 _parse_day_arg —— 那个把 `7.5` 读成「第 7 章 Day 5」,
+        # 而 render 只认第 1 章的扁平 dayN/ 目录,`7.5` 就是 day7.5/ 本身。
+        if not args or not re.fullmatch(r"\d+(\.\d+)?", args[0]):
+            raise SystemExit("❌ 用法: notion.sh render <N>  (N 可以是 7 或 7.5)")
+        # 原样传字符串:int("7.5") 会炸,float(8) 会变成 day8.0。
+        sys.stdout.write(render_day(args[0]))
     else:
         raise SystemExit(f"❌ 未知命令: {cmd or '(空)'}")
 
