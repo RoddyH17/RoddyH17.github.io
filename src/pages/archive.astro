@@ -1,56 +1,119 @@
 ---
+// Archive: every post, grouped by subject rather than by year.
+//
+// Why not chronological: the old version grouped by year and hung an MM-DD on
+// each row, which answered a question nobody was asking. What is actually being
+// archived here is a curriculum — the Rust log is a sequence where Day 1 leads
+// to Day 8 — and a sequence wants reading order, not filing order. Dates carry
+// no meaning for a reader landing on this page, so they are not shown anywhere.
+//
+// Two ordering rules, both stated once and applied everywhere:
+//   groups — largest first, ties alphabetical. The main body of work leads.
+//   inside — by series number when the title carries one ("Day 7.5 · …"),
+//            otherwise oldest first.
+//
+// The series number, not the date, is what orders a curriculum: Day 5.5 was
+// written after Day 6 but belongs between 5 and 6, and sorting by pubDate puts
+// it in the wrong place. Numbered posts lead the group; anything unnumbered
+// follows in the order it was written.
+import { themeConfig } from '~/.config'
+import SiteSeo from '~/components/SiteSeo.astro'
 import LayoutDefault from '~/layouts/LayoutDefault.astro'
 import type { Post } from '~/types'
-import { formatDate, getPosts } from '~/utils'
+import { getCategories, getPathFromCategory, getPosts } from '~/utils'
 
-const posts = await getPosts(true)
+/** "Day 7.5 · Option and Result" → 7.5. Anything else → null. */
+const SERIES_RE = /^\p{L}+\s+(\d+(?:\.\d+)?)\s*[·:]/u
 
-const yearMap = getYearMap(posts)
+const categoryMap = await getCategories()
+const total = (await getPosts(true)).length
 
-interface ListItem {
-  title: string
-  href: string
-  date: string
-}
+const groups = Array.from(categoryMap)
+  .map(([name, posts]) => ({
+    name,
+    href: `/categories/${getPathFromCategory(name, themeConfig.site.categoryMap)}`,
+    // getCategories() inherits the feed's newest-first order; a series reads forward.
+    posts: [...posts].reverse().map(toEntry).sort(bySeriesThenAge),
+  }))
+  .sort((a, b) => b.posts.length - a.posts.length || a.name.localeCompare(b.name))
 
-function getYearMap(posts: Post[]) {
-  const result = new Map<number, ListItem[]>()
-  for (const post of posts) {
-    const year = (post.data.pubDate ?? new Date()).getFullYear()
-    const posts = result.get(year) ?? []
-    posts.push(getListItem(post))
-    result.set(year, posts)
-  }
-  return Array.from(result.entries())
-}
-
-function getListItem(post: Post): ListItem {
+function toEntry(post: Post) {
+  const title = post.data.title
   return {
-    title: post.data.title,
+    title,
     href: `/posts/${post.id}/`,
-    date: formatDate(post.data.pubDate, 'MM-DD'),
+    series: Number(SERIES_RE.exec(title)?.[1] ?? Number.NaN),
   }
+}
+
+function bySeriesThenAge(a: { series: number }, b: { series: number }) {
+  if (Number.isNaN(a.series) && Number.isNaN(b.series)) return 0
+  if (Number.isNaN(a.series)) return 1
+  if (Number.isNaN(b.series)) return -1
+  return a.series - b.series
 }
 ---
 
 <LayoutDefault>
-  <div flex="~ col gap-4">
+  <SiteSeo slot="seo" title="Archive" desc="Every post, grouped by subject and listed in reading order." />
+
+  <section class="prose">
+    <h2 class="post-title">Archive</h2>
+
+    <p class="lead">
+      Everything written here, grouped by what it is about and listed in reading order. The Rust log is a sequence — it
+      runs from the top down, not newest first.
+    </p>
+
+    <p class="op-55 text-3.5">
+      {total} posts in {groups.length}
+      {groups.length === 1 ? 'category' : 'categories'}. Protocol research lives in its own matrix, over in <a
+        href="/research">Research</a
+      >.
+    </p>
+
     {
-      yearMap.map(([year, posts]) => (
-        <section>
-          <h2 class="post-title">{year}</h2>
-          <ul class="pl-6" flex="~ col gap-4">
-            {posts.map(({ title, href, date }) => (
+      groups.map(({ name, href, posts }) => (
+        <section class="mt-9">
+          <h3 class="post-title mb-0 flex items-baseline gap-2">
+            <a href={href}># {name}</a>
+            <span class="op-45 text-3.5 font-normal">{posts.length}</span>
+          </h3>
+          <ul class="entries">
+            {posts.map(({ title, href }) => (
               <li>
-                <h3 class="post-title">
-                  <a href={href}>{title}</a>
-                </h3>
-                <time>{date}</time>
+                <a href={href}>{title}</a>
               </li>
             ))}
           </ul>
         </section>
       ))
     }
-  </div>
+  </section>
 </LayoutDefault>
+
+<style>
+  .lead {
+    font-size: 1.15rem;
+    line-height: 1.65;
+  }
+
+  /* Hairline rows rather than bullets or numbers: the titles already carry
+     their own index ("Day 7.5 · …"), so a second numbering would only compete
+     with it. The rules are here to give the eye a column to run down. */
+  .entries {
+    list-style: none;
+    margin: 0.75rem 0 0;
+    padding: 0;
+  }
+
+  .entries li {
+    margin: 0;
+    padding: 0.45rem 0;
+    border-bottom: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+  }
+
+  .entries li:last-child {
+    border-bottom: none;
+  }
+</style>
