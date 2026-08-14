@@ -1,17 +1,14 @@
 ---
 import type { Post } from '~/types'
-import PostCategory from './PostCategory.astro'
 
 interface Props {
   post: Post
-  // 'list': linked title + categories (no date, no mood — mood stays private).
+  // 'list': linked title only (no date, categories, or mood).
   // 'post': plain title only.
   mode?: 'list' | 'post'
 }
 
 const { post, mode = 'list' } = Astro.props
-
-const categoryList = post.data.categories ?? []
 ---
 
 <header flex="~ col gap-2">
@@ -26,13 +23,4 @@ const categoryList = post.data.categories ?? []
       )
     }
   </h1>
-  {
-    mode === 'list' && (
-      <div class="text-3.5">
-        {categoryList.map((category) => (
-          <PostCategory category={category} />
-        ))}
-      </div>
-    )
-  }
 </header>

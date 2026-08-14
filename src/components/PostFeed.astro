@@ -1,0 +1,38 @@
+---
+import type { Post } from '~/types'
+import Pagination from '~/components/Pagination.astro'
+import LayoutPost from '~/layouts/LayoutPost.astro'
+import { getPostDescription } from '~/utils'
+
+interface Props {
+  posts: Post[]
+  currentPage: number
+  totalPage: number
+  prevUrl?: string
+  nextUrl?: string
+}
+
+const { posts, currentPage, totalPage, prevUrl, nextUrl } = Astro.props
+const { translate: t } = Astro.locals
+---
+
+<section contain-layout flex="~ col gap-7.5">
+  {
+    posts.map((post) => (
+      <LayoutPost post={post}>
+        <p class="line-clamp-4">{getPostDescription(post)}</p>
+      </LayoutPost>
+    ))
+  }
+</section>
+
+<Pagination
+  showLeft={Boolean(prevUrl)}
+  leftTitle={t('prev')}
+  leftUrl={prevUrl}
+  showRight={Boolean(nextUrl)}
+  rightTitle={t('next')}
+  rightUrl={nextUrl}
+  currentPage={currentPage}
+  totalPage={totalPage}
+/>

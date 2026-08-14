@@ -42,15 +42,31 @@ export async function getPosts(isArchivePage = false) {
   return posts
 }
 
+export async function getFeedPosts() {
+  const posts = await getPosts()
+
+  posts.sort((a, b) => {
+    if (a.data.pin && !b.data.pin)
+      return -1
+    if (!a.data.pin && b.data.pin)
+      return 1
+    return 0
+  })
+
+  return posts
+}
+
 export async function getResearch() {
   const notes = await getCollection('research')
 
   // Matrix order, not chronological: protocol, then version, then title.
   notes.sort((a, b) => {
     const p = a.data.protocol.localeCompare(b.data.protocol)
-    if (p !== 0) return p
+    if (p !== 0)
+      return p
     const v = (a.data.version ?? '').localeCompare(b.data.version ?? '', undefined, { numeric: true })
-    if (v !== 0) return v
+    if (v !== 0)
+      return v
     return a.data.title.localeCompare(b.data.title)
   })
 
@@ -118,7 +134,8 @@ export async function getProtocolsBySector() {
       // Ones with research first, then the roadmap, each alphabetical.
       .sort((a, b) => (b.noteCount - a.noteCount) || a.data.name.localeCompare(b.data.name))
 
-    if (inSector.length > 0) grouped.set(sector, inSector)
+    if (inSector.length > 0)
+      grouped.set(sector, inSector)
   }
 
   return grouped
@@ -146,12 +163,4 @@ export function formatDate(date: Date, format: string = 'YYYY-MM-DD') {
   // them in local time shifts the day. Shift back so the displayed date matches
   // the date written in frontmatter.
   return dayjs(new Date(date.getTime() + date.getTimezoneOffset() * 60000)).format(format)
-}
-
-export function getPathFromCategory(
-  category: string,
-  category_map: { name: string, path: string }[],
-) {
-  const mappingPath = category_map.find(l => l.name === category)
-  return mappingPath ? mappingPath.path : category
 }

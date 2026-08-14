@@ -30,11 +30,7 @@ const Tag = open ? 'a' : 'div'
   <div class="min-w-0">
     <div flex="~ gap-2 items-center wrap">
       <span class="text-4.25 font-bold lh-tight">{name}</span>
-      {
-        chains.map(c => (
-          <span class="chain-tag">{c}</span>
-        ))
-      }
+      {chains.map((c) => <span class="chain-tag">{c}</span>)}
     </div>
 
     <p class="op-70 text-3.5 lh-relaxed m-0 mt-1.5">{mechanism}</p>

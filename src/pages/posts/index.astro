@@ -1,0 +1,15 @@
+---
+import { themeConfig } from '~/.config'
+import PostFeed from '~/components/PostFeed.astro'
+import LayoutDefault from '~/layouts/LayoutDefault.astro'
+import { getFeedPosts } from '~/utils'
+
+const posts = await getFeedPosts()
+const pageSize = themeConfig.site.pageSize
+const totalPage = Math.max(1, Math.ceil(posts.length / pageSize))
+const pagePosts = posts.slice(0, pageSize)
+---
+
+<LayoutDefault>
+  <PostFeed posts={pagePosts} currentPage={1} totalPage={totalPage} nextUrl={totalPage > 1 ? '/posts/2' : undefined} />
+</LayoutDefault>

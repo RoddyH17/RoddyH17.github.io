@@ -1,0 +1,37 @@
+---
+import type { GetStaticPaths, InferGetStaticPropsType } from 'astro'
+import { themeConfig } from '~/.config'
+import PostFeed from '~/components/PostFeed.astro'
+import LayoutDefault from '~/layouts/LayoutDefault.astro'
+import { getFeedPosts } from '~/utils'
+
+export const getStaticPaths = (async () => {
+  const posts = await getFeedPosts()
+  const pageSize = themeConfig.site.pageSize
+  const totalPage = Math.max(1, Math.ceil(posts.length / pageSize))
+
+  return Array.from({ length: Math.max(0, totalPage - 1) }, (_, index) => {
+    const currentPage = index + 2
+    const start = (currentPage - 1) * pageSize
+
+    return {
+      params: { page: String(currentPage) },
+      props: {
+        posts: posts.slice(start, start + pageSize),
+        currentPage,
+        totalPage,
+      },
+    }
+  })
+}) satisfies GetStaticPaths
+
+type Props = InferGetStaticPropsType<typeof getStaticPaths>
+
+const { posts, currentPage, totalPage } = Astro.props
+const prevUrl = currentPage === 2 ? '/posts' : `/posts/${currentPage - 1}`
+const nextUrl = currentPage < totalPage ? `/posts/${currentPage + 1}` : undefined
+---
+
+<LayoutDefault>
+  <PostFeed posts={posts} currentPage={currentPage} totalPage={totalPage} prevUrl={prevUrl} nextUrl={nextUrl} />
+</LayoutDefault>

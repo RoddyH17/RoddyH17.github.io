@@ -3,17 +3,15 @@ import type { UserConfig } from '~/types'
 export const userConfig: Partial<UserConfig> = {
   site: {
     title: 'Roddy\'s Wiki',
-    subtitle: 'Amor Fati',
     author: 'Roddy',
     description:
       'Tech x Crypto Learning Roadmap — think, build, trade.',
     website: 'https://roddyh17.github.io/',
     pageSize: 10,
     navLinks: [
-      { name: 'Posts', href: '/' },
+      { name: 'Posts', href: '/posts' },
       { name: 'Research', href: '/research' },
       { name: 'Archive', href: '/archive' },
-      { name: 'Categories', href: '/categories' },
       { name: 'About', href: '/about' },
     ],
     socialLinks: [

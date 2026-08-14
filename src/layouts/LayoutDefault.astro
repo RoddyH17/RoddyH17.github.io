@@ -12,6 +12,15 @@ import '~/styles/global.css'
 
 const lang = themeConfig.appearance.locale ?? 'en-us'
 const dark = themeConfig.appearance.theme === 'dark'
+
+interface Props {
+  layout?: 'default' | 'wide'
+  page?: 'archive'
+}
+
+const { layout = 'default', page } = Astro.props
+const wide = layout === 'wide'
+const archive = page === 'archive'
 ---
 
 <html lang={lang} class:list={['animation-prepared', { dark }]}>
@@ -23,25 +32,24 @@ const dark = themeConfig.appearance.theme === 'dark'
   </head>
 
   <body
-    class="h-100vh max-w-1440px min-w-390px mx-a"
-    p="7.5 lg:(y-0 x-15)"
-    lg="grid gap-x-8 cols-[1fr_16rem] rows-[1fr_9rem]"
+    class:list={[
+      'h-100vh max-w-1440px min-w-0 mx-a p-7.5 lg:grid lg:gap-x-8 lg:grid-cols-[1fr_16rem] lg:grid-rows-[1fr_9rem] lg:py-0 lg:px-15',
+      { 'layout-wide': wide, 'page-archive': archive },
+    ]}
   >
     <header
-      class="transition-swup-header flex flex-col gap-2.5"
-      m="7.5 lg:(x-0 t-20 b-4)"
-      lg="row-1-2 col-2-3 justify-between items-start"
+      class="transition-swup-header flex flex-col gap-2.5 m-7.5 lg:mx-0 lg:mt-20 lg:mb-4 lg:row-1-2 lg:col-2-3 lg:justify-between lg:items-start"
     >
       <SiteTitle />
       <SiteNavigation />
       <LearningPulse />
     </header>
 
-    <main class="transition-swup-main overflow-y-scroll scrollbar-hide outline-none" lg="row-1-3 col-1-2 py-20 ">
+    <main class="transition-swup-main overflow-y-scroll scrollbar-hide outline-none lg:row-1-3 lg:col-1-2 lg:py-20">
       <slot />
     </main>
 
-    <footer class="transition-swup-footer py-7.5" lg="row-2-3 col-2-3">
+    <footer class="transition-swup-footer py-7.5 lg:row-2-3 lg:col-2-3">
       <SiteFooter />
     </footer>
 
@@ -101,6 +109,88 @@ const dark = themeConfig.appearance.theme === 'dark'
         transition-timing-function: linear;
         transform: translateY(0);
         opacity: 1;
+      }
+
+      body.layout-wide {
+        min-height: 100vh;
+        height: auto;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: auto minmax(0, 1fr) auto;
+      }
+
+      body.layout-wide > header {
+        grid-row: 1;
+        grid-column: 1;
+        flex-direction: row;
+        align-items: center;
+        justify-content: flex-start;
+        gap: 2rem;
+        margin: 0;
+        padding: 1.1rem 0;
+        border-bottom: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+      }
+
+      body.layout-wide > header :global(hgroup) {
+        writing-mode: horizontal-tb;
+        border-left: 0;
+      }
+
+      body.layout-wide > header :global(hgroup > a) {
+        display: flex;
+        align-items: baseline;
+        gap: 1rem;
+        padding: 0;
+      }
+
+      body.layout-wide > header :global(hgroup h1) {
+        font-size: 1.45rem;
+      }
+
+      body.layout-wide > header :global(nav),
+      body.layout-wide > header :global(.learning-pulse) {
+        display: none;
+      }
+
+      body.layout-wide > main {
+        grid-row: 2;
+        grid-column: 1;
+        overflow: visible;
+        padding: 3.75rem 0 5rem;
+      }
+
+      body.layout-wide > footer {
+        grid-row: 3;
+        grid-column: 1;
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        gap: 0.5rem 2rem;
+        border-top: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+      }
+
+      body.page-archive > main {
+        padding-top: 2.5rem;
+      }
+
+      body.page-archive {
+        grid-template-columns: minmax(0, 1fr) 15rem;
+      }
+
+      body.page-archive > header {
+        margin-top: 2.5rem;
+      }
+
+      @media (max-width: 767px) {
+        body.layout-wide > header {
+          align-items: flex-start;
+          flex-direction: column;
+          gap: 1rem;
+        }
+
+        body.layout-wide > main {
+          padding: 2.5rem 0 4rem;
+        }
       }
     </style>
   </body>

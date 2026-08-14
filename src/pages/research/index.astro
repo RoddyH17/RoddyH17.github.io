@@ -11,48 +11,41 @@ import { SECTOR_LABEL, getProtocolsBySector } from '~/utils'
 
 const bySector = await getProtocolsBySector()
 const total = Array.from(bySector.values()).flat()
-const studied = total.filter(p => p.noteCount > 0).length
+const studied = total.filter((p) => p.noteCount > 0).length
 ---
 
-<LayoutDefault>
-  <SiteSeo
-    slot="seo"
-    title="Research"
-    desc="Protocol mechanism research — math and engineering decomposition."
-  />
+<LayoutDefault layout="wide">
+  <SiteSeo slot="seo" title="Research" desc="Protocol mechanism research — math and engineering decomposition." />
 
   <section class="prose">
     <h2 class="post-title">Research</h2>
 
     <p class="lead">
-      The object of study here is the engine, not the market around it. Most protocol writing
-      explains what a protocol offers and who might want it; these notes take the matching
-      mechanism apart and state it formally.
+      The object of study here is the engine, not the market around it. Most protocol writing explains what a protocol
+      offers and who might want it; these notes take the matching mechanism apart and state it formally.
     </p>
 
     <p>Every note works along three axes, and each has to come out as something checkable:</p>
 
     <ul>
       <li>
-        <strong>Algorithmic design</strong> — the invariant, and the closed form that answers a
-        quote. What must hold across an operation, and what that forces the price to be.
+        <strong>Algorithmic design</strong> — the invariant, and the closed form that answers a quote. What must hold across
+        an operation, and what that forces the price to be.
       </li>
       <li>
-        <strong>Market structure design</strong> — what the mechanism obliges participants to do.
-        Who supplies, who takes, what each side is being paid or charged for, and what the design
-        makes impossible.
+        <strong>Market structure design</strong> — what the mechanism obliges participants to do. Who supplies, who takes,
+        what each side is being paid or charged for, and what the design makes impossible.
       </li>
       <li>
-        <strong>Cost design</strong> — where clean algebra meets <code>uint256</code> and finite
-        gas: fixed-point format, which direction a quantity rounds, and whom that rounding favours.
-        The divergence is always deliberate.
+        <strong>Cost design</strong> — where clean algebra meets <code>uint256</code> and finite gas: fixed-point format,
+        which direction a quantity rounds, and whom that rounding favours. The divergence is always deliberate.
       </li>
     </ul>
 
     <p>
-      Not discussed: demand, adoption, user segments, narrative. Volume is a consequence of engine
-      design rather than an input to it, so it belongs downstream of every question asked here. A
-      claim only counts once it is anchored to a pinned commit.
+      Not discussed: demand, adoption, user segments, narrative. Volume is a consequence of engine design rather than an
+      input to it, so it belongs downstream of every question asked here. A claim only counts once it is anchored to a
+      pinned commit.
     </p>
 
     <p class="op-55 text-3.5">
@@ -61,10 +54,10 @@ const studied = total.filter(p => p.noteCount > 0).length
 
     {
       Array.from(bySector).map(([sector, protocols]) => (
-        <section class="mt-10">
+        <section class="research-sector mt-10">
           <h3 class="post-title mb-4"># {SECTOR_LABEL[sector] ?? sector}</h3>
           <div class="protocol-grid">
-            {protocols.map(p => (
+            {protocols.map((p) => (
               <ProtocolCard
                 id={p.id}
                 name={p.data.name}
@@ -86,6 +79,10 @@ const studied = total.filter(p => p.noteCount > 0).length
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
     gap: 0.875rem;
+  }
+
+  section.prose > .research-sector {
+    max-width: none;
   }
 
   .lead {

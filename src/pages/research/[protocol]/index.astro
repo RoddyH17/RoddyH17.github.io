@@ -15,7 +15,7 @@ export const getStaticPaths = (async () => {
   const protocols = await getCollection('protocols')
   const notesByProtocol = await getResearchByProtocol()
 
-  return protocols.map(p => ({
+  return protocols.map((p) => ({
     params: { protocol: p.id },
     props: { protocol: p, notes: notesByProtocol.get(p.id) ?? [] },
   }))
@@ -33,7 +33,7 @@ const links = [
 ].filter((l): l is [string, string] => Boolean(l[1]))
 ---
 
-<LayoutDefault>
+<LayoutDefault layout="wide">
   <SiteSeo slot="seo" title={`${d.name} — Research`} desc={d.mechanism} />
 
   <article class="prose">
@@ -50,8 +50,10 @@ const links = [
       </div>
     </header>
 
-    {/* No label above this. It is the lead sentence, not a labelled field —
-        the reader should hit the mechanism before anything else on the page. */}
+    {
+      /* No label above this. It is the lead sentence, not a labelled field —
+        the reader should hit the mechanism before anything else on the page. */
+    }
     <p class="mechanism-lead">{d.mechanism}</p>
 
     {
@@ -94,7 +96,7 @@ const links = [
 
     <ul class="note-list">
       {
-        notes.map(note => (
+        notes.map((note) => (
           <li>
             <a href={`/research/${note.id}`} class="text-4.5 font-bold">
               {note.data.version && `${note.data.version} · `}

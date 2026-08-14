@@ -1,4 +1,4 @@
-import type { Link, Meta } from 'astro-seo'
+import type { SEOProps } from 'astro-seo'
 import type {
   AvailableLanguage,
   BooleanString,
@@ -28,14 +28,12 @@ export type UserConfig = DeepPartial<ThemeConfig>
 
 export interface ConfigSite {
   title: string
-  subtitle: string
   author: string
   description: string
   website: string
   pageSize: number
   socialLinks: { name: string, href: string }[]
   navLinks: { name: string, href: string }[]
-  categoryMap: { name: string, path: string }[]
   footer: string[]
 }
 
@@ -49,8 +47,8 @@ export interface ConfigAppearance {
 
 export interface ConfigSEO {
   twitter: string
-  meta: Partial<Meta>[]
-  link: Partial<Link>[]
+  meta: NonNullable<NonNullable<SEOProps['extend']>['meta']>
+  link: NonNullable<NonNullable<SEOProps['extend']>['link']>
 }
 
 export interface ConfigComment {

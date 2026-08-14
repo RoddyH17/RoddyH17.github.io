@@ -35,7 +35,7 @@ const { entry, protocol } = Astro.props
 const { Content } = await render(entry)
 const d = entry.data
 
-function anchorUrl(s: { repo: string, commit?: string, path?: string, lines?: string }) {
+function anchorUrl(s: { repo: string; commit?: string; path?: string; lines?: string }) {
   if (!s.path) return `https://github.com/${s.repo}`
   const ref = s.commit ?? 'HEAD'
   const hash = s.lines ? `#L${s.lines.replace('-', '-L')}` : ''
@@ -43,7 +43,7 @@ function anchorUrl(s: { repo: string, commit?: string, path?: string, lines?: st
 }
 ---
 
-<LayoutDefault>
+<LayoutDefault layout="wide">
   <SiteSeo slot="seo" title={d.title} desc={d.description ?? d.goal} />
 
   <article class="prose">
@@ -58,7 +58,13 @@ function anchorUrl(s: { repo: string, commit?: string, path?: string, lines?: st
         <span>{formatDate(d.pubDate)}</span>
         <span>Revision {d.revision}</span>
         <span>{CATEGORY_LABEL[d.category] ?? d.category}</span>
-        {d.version && <span>{protocol?.data.name ?? d.protocol} {d.version}</span>}
+        {
+          d.version && (
+            <span>
+              {protocol?.data.name ?? d.protocol} {d.version}
+            </span>
+          )
+        }
         {d.draft && <span class="draft-tag">draft</span>}
       </p>
 
@@ -85,11 +91,10 @@ function anchorUrl(s: { repo: string, commit?: string, path?: string, lines?: st
         <section>
           <h2>Code anchors</h2>
           <p class="op-70 text-3.5">
-            Pinned to a commit. If a claim below cannot be traced to one of these, it is not yet a
-            finding.
+            Pinned to a commit. If a claim below cannot be traced to one of these, it is not yet a finding.
           </p>
           <ul>
-            {d.sources.map(s => (
+            {d.sources.map((s) => (
               <li>
                 <a href={anchorUrl(s)} target="_blank" rel="noopener">
                   <code>
@@ -112,11 +117,11 @@ function anchorUrl(s: { repo: string, commit?: string, path?: string, lines?: st
         <section>
           <h2>DeepWiki query trail</h2>
           <p class="op-70 text-3.5">
-            How this note was researched. Retrieval only — every conclusion drawn from these was
-            re-checked against the pinned source above.
+            How this note was researched. Retrieval only — every conclusion drawn from these was re-checked against the
+            pinned source above.
           </p>
           <ul>
-            {d.deepwiki.map(q => (
+            {d.deepwiki.map((q) => (
               <li>
                 <a href={q.url} target="_blank" rel="noopener">
                   {q.repo}
@@ -134,7 +139,11 @@ function anchorUrl(s: { repo: string, commit?: string, path?: string, lines?: st
       d.open.length > 0 && (
         <section>
           <h2>Open questions</h2>
-          <ul>{d.open.map(q => <li>{q}</li>)}</ul>
+          <ul>
+            {d.open.map((q) => (
+              <li>{q}</li>
+            ))}
+          </ul>
         </section>
       )
     }
