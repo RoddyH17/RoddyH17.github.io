@@ -1,0 +1,195 @@
+---
+title: "Day 7.5 · Option and Result — A Type Is a Pair of Rules"
+pubDate: "2026-08-12"
+author: "Roddy"
+description: "Every type is defined by two sets of rules: how you make one, and how you use one up. Option's constructors are Some and None, and its only eliminator is match — which explains why Rust won't just let you reach in and take the value. Plus why map only touches one side, why a String error type costs the caller everything, and why ? is a return statement rather than an unwrapping."
+categories: ['rust']
+mood: [zen, frage]
+---
+
+# Day 7.5 · Option and Result
+
+Three threads today: revisit `Option`, understand where generics came from, and learn how Rust reports failure. They turned out to be the same thread, and the thing that tied them together was a sentence from type theory:
+
+> Every type is defined by two sets of rules — **introduction rules** (how you make one) and **elimination rules** (how you use one up).
+
+`Option<T>`'s introduction rules are `Some` and `None`. Its elimination rule is `match`. Once I accepted that, `Option` stopped being "a box that might be empty" and became **a pair of rules**, and every API I learned today turned out to be sugar over one of them.
+
+> Today's code: [`day7.5/option/`](https://github.com/RoddyH17/rust_learn/tree/main/day7.5/option) · Notes: [`day7.5/NOTES.md`](https://github.com/RoddyH17/rust_learn/blob/main/day7.5/NOTES.md)
+
+## Why Rust won't let you just take the value
+
+The definition is two lines:
+
+```rust
+enum Option<T> {
+    Some(T),
+    None,
+}
+```
+
+I had been quietly annoyed that I can't reach into an `Option` and grab what's inside. The rules explain it: **"reach in and grab it" is not one of the elimination rules.** The only door is `match`, and `match` makes me write the `None` arm. There is no version of this where I get the value without having said what happens when there isn't one.
+
+Push it one step further and it gets stranger. The **Böhm–Berarducci encoding** says any algebraic data type is isomorphic to a polymorphic function type over the result. So `Option<T>` and "a function that takes two handlers and returns a result" are the same object. `match` is just the syntax that object wears.
+
+One small consequence of `Option` being an ordinary enum:
+
+```rust
+let some_number = Some(5);            // inferred as Option<i32>
+let no_number: Option<i32> = None;    // annotation required
+```
+
+`Some(5)` carries an `i32` for the compiler to look at. `None` carries nothing, so nothing in the expression says what `T` is.
+
+## Three shapes of the same elimination rule
+
+| Written as | What it is | On `None` | When |
+|---|---|---|---|
+| `match x { Some(n) => .., None => .. }` | the full rule | the arm you wrote | both cases genuinely need handling |
+| `x.unwrap()` | only the `Some` arm; `None` goes to panic | **panic** | it's logically impossible to be `None` |
+| `x.map(f)` | only changes the `Some` arm | `None` | transforming a value, not making a decision |
+
+Seeing them in one table is what made `unwrap` click. `unwrap` isn't "get the value" — it's **handing the `None` branch over to panic**. It doesn't save you the decision, it outsources it.
+
+```rust
+let mut s = String::from("hello");
+let p1 = s.pop().unwrap();          // fine
+
+let empty = String::from("");
+empty.pop().unwrap();               // panic: called `Option::unwrap()` on a `None` value
+```
+
+`expect` is the same thing with a sentence attached. The sentence is the entire difference, and on a program that's already dying it's worth a lot.
+
+## Two kinds of failure, and the real distinction
+
+|  | Type | What it is | Can it be matched? |
+|---|---|---|---|
+| Recoverable | `Result<T, E>` | a **value** | yes |
+| Unrecoverable | `panic!` | a **termination** | no |
+
+I'd assumed the split was about severity. It isn't. It's about **whether the failure is a value.** A `Result` can be returned, passed around, stored, matched. A `panic!` can't be any of those things — it isn't a value, it flips the table.
+
+Which reframes indexing out of bounds:
+
+```rust
+let v = vec![1, 2, 3];
+v[99];          // panic: index out of bounds
+v.get(99);      // None
+```
+
+Reading past the end of an array is a classic buffer overflow, and languages get designed specifically to prevent it. But the reason it's *unrecoverable* rather than *an error value* is narrower than "it's a security problem": once you've read memory outside the array, **what you read is undefined**, and the program no longer knows what it's doing. Continuing is worse than stopping. If you want the recoverable version, `get` is right there — it puts "might not be there" back into the type.
+
+## `map` only touches one side
+
+```rust
+for num in line.lines() {
+    match num.parse::<i32>().map(|i| i * 2) {
+        Ok(n) => println!("{} -> {}", num, n),
+        Err(..) => println!("{} -> unparseable, skipped", num),
+    }
+}
+```
+
+`map` applies to the success side; `Err` passes through untouched. That isn't laziness in the design — if `map` also transformed `Err`, then `Result` couldn't reliably mean "this failed," because a later transformation could quietly rewrite the failure. There's a separate method for the other side, `map_err`, and the fact that it's separate is the point.
+
+## An error type you can actually match on
+
+```rust
+#[derive(Debug)]
+pub enum MathError {
+    DivisionByZero,
+    NegativeSquareRoot,
+}
+
+fn div(a: f64, b: f64) -> Result<f64, MathError> {
+    if b == 0.0 {
+        Err(MathError::DivisionByZero)
+    } else {
+        Ok(a / b)
+    }
+}
+```
+
+Wrapping errors this way looks tidier, but tidiness is a side effect. The payoff is entirely on the caller's side:
+
+```rust
+match div(1.0, 0.0) {
+    Ok(v) => ...,
+    Err(MathError::DivisionByZero) => ...,       // recognisably *this* failure
+    Err(MathError::NegativeSquareRoot) => ...,
+}
+```
+
+With `Result<f64, String>` that code cannot be written. **A string can't be matched exhaustively.** The moment an error becomes a `String`, the caller's only remaining option is to print it for a human. Making the error an enum is what turns failure into data that can be dispatched on.
+
+## `?` is a return, not an unwrapping
+
+```rust
+fn div_then_sqrt(a: f64, b: f64) -> Result<f64, MathError> {
+    let q = div(a, b)?;
+    let r = sqrt(q)?;
+    Ok(r)
+}
+```
+
+Two things that can fail, three possible paths through the function, and not a single `match` in the body.
+
+The rule that `?` only works inside a function returning `Result` (or `Option`) sounds arbitrary until you read `?` correctly: it means *"if this failed, `return Err(..)` right now."* It's a return statement. A return statement has to know what shape it's returning. That's the whole restriction — and it's why `?` doesn't work in a default `fn main()`, whose return type is `()`. Change the signature to `fn main() -> Result<(), Box<dyn Error>>` and it works again.
+
+I hit this by trying to use `?` directly in `main` and getting a compile error. The error taught the concept better than the explanation did: `?` isn't unwrapping, it's leaving early.
+
+## Converting between them is adding or removing information
+
+| Direction | Method | What it does |
+|---|---|---|
+| `Option<T>` → `Result<T, E>` | `ok_or(e)` / `ok_or_else(f)` | **adds** information: "absent" becomes "absent because e" |
+| `Result<T, E>` → `Option<T>` | `.ok()` | **drops** information: the reason is discarded |
+| `Result<T, E>` → `Option<E>` | `.err()` | keeps only the failure side |
+
+```rust
+fn first(arr: &[i32]) -> Result<&i32, String> {
+    arr.get(0).ok_or("out of index".to_string())
+}
+```
+
+`ok_or` versus `ok_or_else` is worth one line of thought: the argument to `ok_or(e)` is evaluated whether or not it's needed, while `ok_or_else(|| e)` only runs on failure. If the error is a constant, either is fine. If you're building it with `format!`, the closure version stops you from assembling a string on every successful call.
+
+## Four layers, and why `Option` is the one that shows up everywhere
+
+| Layer | Decides | Happens at |
+|---|---|---|
+| generic `T` | what can go inside | **compile time** |
+| `enum` | which shapes a value can have | **compile time** |
+| `match` | which shape this value has | run time |
+| function | how input becomes output | run time |
+
+`Option<T>` is powerful because it uses the first three at once: `T` for the contents, `Some`/`None` for the shape, `match` for the dispatch. `Result<T, E>` is cast from the same mould, with `None` replaced by "a `None` that carries a reason."
+
+And this is what "generic programming" actually means. Not "a box that holds anything" — rather, **the decision about what goes inside is deferred to the call site, and the deferred part is settled entirely at compile time.**
+
+```rust
+let a: Option<i32> = Some(1);
+let b: Option<String> = Some("x".to_string());
+// one enum, two monomorphisations
+```
+
+## Practice
+
+Six exercises in [`examples/practice.rs`](https://github.com/RoddyH17/rust_learn/blob/main/day7.5/option/examples/practice.rs): a `describe` that isn't allowed to use `unwrap` or `expect`, an `nth` that upgrades absence into a reason, an error enum reached through `map_err`, a chain of nested matches to be compressed into three lines with `?`, a predict-then-run on which side `map` and `map_err` land, and a `parse_all` that collects `Vec<Result<T, E>>` into `Result<Vec<T>, E>`.
+
+The last one is the one worth doing. It forces the distinction between **"skip the bad ones"** and **"one bad one voids the batch"** — a choice real systems make constantly and in both directions. Parsing a market data feed, you skip. Parsing an order, you fail the whole thing.
+
+## The semicolon
+
+One error from today that belongs to Day 2, not Day 7.5:
+
+```rust
+fn first(arr: &[i32]) -> Result<&i32, String> {
+    arr.get(0).ok_or("out of index".to_string());   // this semicolon
+}
+```
+
+`error[E0308]: mismatched types`. With the semicolon it's a statement, the value is discarded, and the body evaluates to `()`. Without it, it's the return value. I'd read about expressions versus statements a week ago and understood it; today was the first time one semicolon changed what a function returns underneath me.
+
+Tomorrow: modules — `mod`, `use`, `pub`, and how a program stops being one enormous `fn main`.

@@ -1,0 +1,172 @@
+---
+title: "Day 8 · Modules — Everything Is Private Until You Say Otherwise"
+pubDate: "2026-08-13"
+author: "Roddy"
+description: "Seven days of code piled into one fn main, and today is about cutting it up. Modules don't produce compilation units, which means splitting files is a decision made for humans, not the compiler. Plus the three strengths of pub, why pub(in path) is a narrower pub rather than a stronger one, and why a boundary you actually want enforced has to be a crate."
+categories: ['rust']
+mood: [zen]
+---
+
+# Day 8 · Modules
+
+Every line of code I've written for the last seven days lives inside one `fn main`. Today is about cutting it apart.
+
+There are two levels of cutting: inside one crate you use `mod`, between crates you use a workspace. At both levels the thing that decides how wide the opening is, is **visibility** — and Rust's position on that is blunt: **everything is private by default.** A missing `pub` isn't an oversight. It's a statement that the item is an implementation detail.
+
+> Today's code: [`day8/module/`](https://github.com/RoddyH17/rust_learn/tree/main/day8/module) · Notes: [`day8/NOTES.md`](https://github.com/RoddyH17/rust_learn/blob/main/day8/NOTES.md)
+
+## Three levels, and only one of them is real to the compiler
+
+| Level | Unit of | Defined by | New compilation unit? |
+|---|---|---|---|
+| **Package** | what cargo manages | one `Cargo.toml` | — |
+| **Crate** | **compilation** | one `src/main.rs` (binary) or `src/lib.rs` (library) | yes |
+| **Module** | **namespace** | the `mod` keyword | **no** |
+
+A package contains one or more binary crates, or a library — at least one crate, always. `cargo new --lib xxx` makes a library package.
+
+The row that matters is the last one. **A module doesn't produce a compilation unit.** It's a pure logical division: writing everything in one file and splitting it across many is, to the compiler, exactly the same program. Which means "should I split this into files?" is a question about people reading the code, not about the build.
+
+## Private by default
+
+```rust
+mod visibility {
+    pub fn open() {}
+    fn closed() {}          // invisible outside the module
+}
+
+visibility::open();
+// visibility::closed();    // error[E0603]: function `closed` is private
+```
+
+The default running the other way — public unless marked private — would make every function part of the contract by accident. This way, the contract is exactly the set of things someone deliberately typed `pub` in front of.
+
+## Three strengths of `pub`
+
+| Written as | Opening | When |
+|---|---|---|
+| `pub` | anyone, including crates that depend on you | the actual public API |
+| `pub(crate)` | this crate only | internal tools shared across modules |
+| `pub(in path)` | only inside the named subtree | a back door for one small region |
+
+```rust
+mod a {
+    pub(in crate::a) mod secret {
+        pub fn hidden() {}
+    }
+    pub fn call_secret() { secret::hidden(); }   // a can reach it
+}
+
+a::call_secret();
+// a::secret::hidden();     // error[E0603]: module `secret` is private
+```
+
+I learned this one by breaking it. I'd written a `use a::{b::log as log2, log}` at the crate root against a `pub(in crate::a) mod b` and got `E0603` pointing at two lines at once: my `use`, and the definition. `pub(in crate::a)` means *public within the subtree `crate::a`* — and the crate root is not inside `a`, so from up there it's invisible.
+
+Which fixed my mental model: **`pub(in path)` is not a stronger `pub`, it's a narrower one.** The `path` has to be one of your own ancestors, too — you can't hand out access to an unrelated module.
+
+The distinction between `pub` and `pub(crate)` is invisible in a single-crate project; they compile identically. Its value is entirely forward-looking. In a library, `pub` is a semver promise — changing it is a major version — so the discipline is to write `pub(crate)` by default and spend `pub` only on things you actually want to be held to.
+
+## `::` is not `.`
+
+> `a.echo()` — wrong. That's a method call, not a path.
+
+This is the easiest thing to mix up all day, and the rule is short: **`.` looks for a method on a value; `::` looks for a name in a namespace.** A module isn't a value. It doesn't exist at runtime at all — after compilation there are no modules, only mangled symbol names. So `::` is the only option.
+
+```rust
+crate::a::echo();   // absolute: counts from the crate root
+a::echo();          // relative: counts from here
+```
+
+At the crate root those are the same call. The thing that picks between them is what happens when code moves: relative paths travel with a module when you relocate it, absolute paths have to be rewritten.
+
+## `self` and `super`
+
+```rust
+mod a {
+    pub fn echo() {}
+    pub fn log() {
+        echo();          // bare
+        self::echo();    // identical, just louder about where it came from
+    }
+    pub mod b {
+        use super::echo;   // reach one level up
+        pub fn echo_b() { echo(); }
+    }
+}
+```
+
+`self::` compiles to exactly the bare call; writing it is purely for the reader. `super::` is the one that's load-bearing — **a child module doesn't inherit its parent's names**, so reaching up has to be explicit.
+
+## `use` moves names, not code
+
+```rust
+use a::b::log;
+log();                                    // instead of a::b::log()
+
+use a::{b::log as log2, log as log_a};    // braces to group, as to disambiguate
+```
+
+Two functions both named `log` won't fit in one scope, and `as` renames one of them. The braces are pure shorthand — `a::{b::log, log}` is two `use` lines written on one.
+
+Worth being precise about what `use` does: it brings a **name** into scope, not code. There's no runtime cost, no copy, nothing generated. It saves typing and that's all it does.
+
+## `as` is two different keywords
+
+| Position | Meaning |
+|---|---|
+| `use x as y` | **rename** — a compile-time substitution of a name |
+| `expr as T` | **cast** — may actually change the data |
+
+```rust
+let x: u8 = 1;
+add(x as usize, 1);
+```
+
+Same keyword, unrelated jobs. On the cast side, direction matters: `u8 as usize` widens and is safe; `usize as u8` narrows and **silently truncates the high bits** — no error, no panic, no warning. That's a rare thing in Rust, and worth remembering precisely because it's rare.
+
+## Smaller than private
+
+```rust
+fn main() {
+    fn add(a: usize, b: usize) -> usize { a + b }
+    mod helpers { pub fn open() {} }
+}
+```
+
+Both are scoped to the function and invisible outside it — an opening narrower than `private`, with no module needed at all.
+
+One catch I ran into: a module defined inside a function **can't be reached through `crate::`**, because it isn't on the crate's module tree. That's why today's `mod a` has to sit at the crate root for the absolute-path demonstration to work at all.
+
+## Workspaces, and boundaries that are actually enforced
+
+```toml
+# root Cargo.toml
+[workspace]
+members = ["crates/core", "crates/engine"]
+
+# crates/engine/Cargo.toml
+[dependencies]
+core = { path = "../core" }
+```
+
+|  | Divides | Enforced by |
+|---|---|---|
+| `mod` | **inside** one crate | how strong the `pub` is |
+| workspace | **between** crates | `dependencies` in `Cargo.toml` |
+
+The difference is how hard the boundary is. A module boundary runs on discipline — within one crate, a `pub(crate)` punches straight through it. A crate boundary is real: if it isn't in `dependencies`, the code doesn't compile.
+
+So if the goal is just "make code easy to find," modules are enough. If the goal is "this layer must never depend on that layer," it has to be separate crates. Today looked like the most syntax-heavy day so far, and it's actually the one that decides the shape of the project I'm about to start.
+
+## Practice
+
+Six exercises in [`examples/practice.rs`](https://github.com/RoddyH17/rust_learn/blob/main/day8/module/examples/practice.rs): add `pub` until `shop::price()` is reachable (do both the `mod` and the `fn` need it?), call one `helper()` three ways via `crate::` / `super::` / `use`, resolve two identically-named imports with `as`, predict which of four calls compile before running them, answer what `pub mod` actually makes public, and refactor Day 7's `word_count` into a `text` module with `normalize` kept private.
+
+That last one is the first real exercise in drawing a public API boundary. "What should be `pub` and what should be hidden" is the question the whole project ahead is made of.
+
+## What's next
+
+The base curriculum ends here. Next is the staged project, and the workspace from today is its foundation — though "I know this exists" is all I have so far; the actual multi-crate split is something to learn by doing it.
+
+Still owed: `String`, now two days late — `push_str` versus `+` and their ownership difference, `format!`, and why a `String` can't be indexed. And the honest gap list before starting: zero hand-written `impl<T>`, zero lifetime annotations, zero `Box`/`Rc`/`RefCell`, zero closures, and **zero `#[test]` in the entire repository**.
