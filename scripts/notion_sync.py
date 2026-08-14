@@ -857,10 +857,16 @@ def cmd_audit(arg=None):
         raise SystemExit(f"❌ {RUST_LEARN} 下没有 dayN 目录")
 
     if arg:
-        day, _chapter = _parse_day_arg(arg)
-        if day not in days:
-            raise SystemExit(f"❌ 没有 day{day}/。已有: {days}")
-        days = [day]
+        # 半天日号(7.5)和跨章日号(2.3)长得一模一样,只能让文件系统裁决:
+        # day7.5/ 存在就当半天,不存在才按「第 c 章 Day d」解析。不裁决的话
+        # `audit 7.5` 会被读成「第 7 章 Day 5」,静默去查 day5/ —— 查错了天还不报错。
+        picked = [d for d in days if str(d) == arg]
+        if not picked:
+            day, _chapter = _parse_day_arg(arg)
+            picked = [d for d in days if d == day]
+            if not picked:
+                raise SystemExit(f"❌ 没有 day{day}/。已有: {days}")
+        days = picked
 
     for m in days:
         _audit_one(m)
