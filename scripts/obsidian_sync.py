@@ -81,7 +81,16 @@ CREATED_EXEMPT = ("2025",)
 
 # slug ↔ 工具笔记名。词表的唯一定义源,批次 1 逐条填。
 # 空表时下面两条校验自动空转。
-TOOLS = {}
+TOOLS = {
+    # 批次 1 逐条填。左边是受控词表的 slug(doctor 校验这一层),右边是工具笔记名
+    # (人读那一层)。规则:打了 slug 的笔记,正文里必须有对应的中文双链 ——
+    # tags 从此不是形容词,是**可验证的调用记录**。工具笔记自己不必自链。
+    "estimate-termwise":        "逐项估计",
+    "estimate-sum-by-integral": "和的积分估计",
+    "split-range-and-estimate": "分段估计",
+    "give-an-epsilon-of-room":  "an epsilon of room",
+    "summation-by-parts":       "基于分部求和法的和的估计",
+}
 
 # frontmatter 里的标量键与列表键。顺序即 Notion callout 里的呈现顺序。
 SCALAR_META = ("type", "lecture", "created", "horizon", "origin")
@@ -617,10 +626,15 @@ def doctor(only=None):
         # 抽象断裂点只作为**参考数字**打印,不计入问题数。MOC 写的是「一篇 1–3 处,
         # 不铺满」,但那是写作时的自我提醒,不是可以由脚本判定的硬约束 ——
         # 判断一处断裂点该不该在,只有写的人知道。
-        # 工具的失效边界。2025 的 55 篇里只有 2 篇写了独立的边界小节,
-        # 做成硬错等于 doctor 永远红着 —— 所以和「抽象断裂点」同级,只作参考。
-        if t == "tool" and not fm.get("boundary"):
-            notes_only.append(f"{r}:tool 未记录 boundary(失效边界)")
+        # 工具的失效边界。**写在正文末尾的小节里,不写进 frontmatter**
+        # (用户 2026-08-29 决定):边界是内容不是元数据,而且 frontmatter 里的
+        # 双链在 Obsidian 的图谱里未必算数,放正文才一定连得上。
+        # 约定:小节标题以「边界」开头。
+        #
+        # 只作参考、不计入问题数,理由同「抽象断裂点」—— 2025 的 55 篇里迁移前
+        # 只有 2 篇写过独立边界小节,做成硬错等于 doctor 永远红着。
+        if t == "tool" and not re.search(r"^#{2,}\s*边界", scan, re.M):
+            notes_only.append(f"{r}:tool 未写「边界」小节(失效条件)")
 
         if t in ("lecture", "vibelearn"):
             n = scan.count("抽象断裂点")
