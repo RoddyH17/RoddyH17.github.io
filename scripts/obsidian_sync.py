@@ -604,7 +604,12 @@ def doctor(only=None):
                 # 先判废除,再判形状 —— 否则一个废除标签会同时挨两条报错
                 msgs.append(f"残留已废除的标签 `{tag}`")
                 continue
-            if "-" not in tag:
+            if not tag.isascii():
+                # 用户 2026-08-29 定:tags 一律英文。field 与正文照旧用中文 ——
+                # tags 是**受控词表**,要跨语言稳定、可被脚本对齐,中文名词进来
+                # 就会和 field 混成一团。
+                msgs.append(f"tags `{tag}` 含非 ASCII 字符:tag 一律用英文")
+            elif "-" not in tag:
                 msgs.append(f"tags `{tag}` 不像「动作—对象」路线(如 trace-expression-evaluation)")
             # 工具 tag 必须真的调用了那个工具。这条把 tags 从形容词变成
             # **可验证的调用记录** —— 打了 `estimate-termwise` 的笔记,正文里
