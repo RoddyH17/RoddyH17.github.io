@@ -90,6 +90,17 @@ TOOLS = {
     "split-range-and-estimate": "分段估计",
     "give-an-epsilon-of-room":  "an epsilon of room",
     "summation-by-parts":       "基于分部求和法的和的估计",
+    # 第二批
+    "bound-a-limsup-of-sets":                  "Borel-Cantelli lemma及其应用",
+    "lift-a-difference-bound-to-a-sequence-bound": "序列差分的估计蕴含着序列本身的估计",
+    "expand-an-indicator-into-a-sum":          "把条件函数展开为新的求和然后换序",
+    "prove-a-set-is-null":                     "an epsilon of room证明集合为0测度的策略",
+    "verify-an-identity-on-a-dense-subset":    "identity theorem",
+    "swap-the-order-of-summation":             "和以及积分换序",
+    "factor-a-diophantine-equation":           "利用因式分解求解丢番图方程",
+    "apply-the-pigeonhole-principle":          "鸽笼原理",
+    "pass-to-a-better-subsequence":            "用子列来提升收敛或发散性质",
+    "descend-to-a-smaller-solution":           "无穷递降",
 }
 
 # frontmatter 里的标量键与列表键。顺序即 Notion callout 里的呈现顺序。
