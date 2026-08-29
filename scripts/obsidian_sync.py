@@ -52,6 +52,11 @@ NOTE_TYPES = {
     "lecture":   "手写课堂记录经过识别与重组后的讲义",
     "vibelearn": "沿网站 / Notebook / 代码 / 线上课程主动学习形成的笔记",
     "knot":      "由学习症状、用户提问或概念冲突触发,经互动后形成的解结文档",
+    # 下面两种是 2025 vault 迁入时补的(2026-08-28 用户拍板)。MOC 原文写的是
+    # 「学习产物只有三种生成方式」—— 这是**修改上游**,不是脚本自作主张,
+    # MOC 与模板已同步改。
+    "tool":      "从多个已解决的问题里抽出的方法,记录触发条件、执行技术与失效边界",
+    "uber":      "由一道具体问题的消化产生的笔记:解法、其中的想法、以及为什么别的路走不通",
 }
 # moc 是导航基础设施,不伪装成学习产物。
 INFRA_TYPES = {"moc"}
@@ -60,6 +65,23 @@ INFRA_TYPES = {"moc"}
 # 行政边界」。课程归属由**目录与 MOC** 保存,不由 frontmatter 保存。
 # 下游一律不得再读它 —— doctor 会把任何残留报出来。
 RETIRED_KEYS = ("course",)
+
+# `course` 是被废除的**键**;下面这些是被废除的**值**。
+# 前四个是行政边界(考试与竞赛的名字),与 course 同类 —— 2026-08-28 用户拍板删除,
+# 「川大 23 年数分」这类出处改写进正文题目下方,那本来就是它该待的地方。
+# `tool_idea` 是 2025 用来标工具笔记的老办法,现在由 `type: tool` 承担。
+RETIRED_TAGS = ("考研", "大学数学竞赛", "中学数学竞赛", "高考", "tool_idea")
+
+# 2025 没有可靠的出生日期:全 vault 0 篇有 created,mtime 有 317/561 挤在一次
+# 整体拷贝上,git 的 --follow 也有 62% 落在同一个批量导入日。与其灌噪声进
+# Holzwege 的时间索引,不如留空(2026-08-28 用户拍板)。
+# 按**路径段**匹配(不是前缀):本机是 `Ideas/2025/...`,Cowork 桌面工作区把它
+# 挂成 `mnt/2025/...`,`Ideas` 那一段不在。按段匹配两边都成立。
+CREATED_EXEMPT = ("2025",)
+
+# slug ↔ 工具笔记名。词表的唯一定义源,批次 1 逐条填。
+# 空表时下面两条校验自动空转。
+TOOLS = {}
 
 # frontmatter 里的标量键与列表键。顺序即 Notion callout 里的呈现顺序。
 SCALAR_META = ("type", "lecture", "created", "horizon", "origin")
@@ -146,6 +168,19 @@ def ladder_of(path):
                 "category": lad["category"],
             }
     return None
+
+
+def created_exempt(path):
+    """按绝对路径的**路径段**判,不按 rel(),也不按前缀。
+
+    两个坑都踩过:
+    - rel() 是相对 OBSIDIAN_VAULT 的。把 vault 直接指到 `Ideas/2025` 时,
+      rel() 不会以 `Ideas/2025/` 开头,按 rel 判会静默失效。
+    - 按 `Ideas/2025/` 做子串匹配也不行:Cowork 桌面工作区把它挂成
+      `mnt/2025/`,`Ideas` 那一段根本不在路径里。
+    """
+    segs = os.path.abspath(path).replace(os.sep, "/").split("/")
+    return any(pfx in segs for pfx in CREATED_EXEMPT)
 
 
 def publish_denied(path):
@@ -528,13 +563,16 @@ def doctor(only=None):
         if not t:
             msgs.append("缺 type")
         elif t not in NOTE_TYPES and t not in INFRA_TYPES:
-            msgs.append(f"type 不在枚举内:{t}(应为 lecture / vibelearn / knot / moc)")
+            msgs.append(
+                f"type 不在枚举内:{t}"
+                "(应为 lecture / vibelearn / knot / tool / uber / moc)"
+            )
 
         for k in RETIRED_KEYS:
             if k in fm:
                 msgs.append(f"残留已废除的字段 `{k}` —— 课程归属由目录与 MOC 保存")
 
-        if not fm.get("created"):
+        if not fm.get("created") and not created_exempt(p):
             msgs.append("缺 created")
         for k in ("field", "tags"):
             if not fm.get(k):
@@ -551,9 +589,24 @@ def doctor(only=None):
                 msgs.append(f"{k} 写成了标量,应为 YAML 列表")
 
         # tags 是「动作—对象」路线,不是名词标签
+        stem = os.path.basename(r)[:-3]
         for tag in fm.get("tags", []) if isinstance(fm.get("tags"), list) else []:
+            if tag in RETIRED_TAGS:
+                # 先判废除,再判形状 —— 否则一个废除标签会同时挨两条报错
+                msgs.append(f"残留已废除的标签 `{tag}`")
+                continue
             if "-" not in tag:
                 msgs.append(f"tags `{tag}` 不像「动作—对象」路线(如 trace-expression-evaluation)")
+            # 工具 tag 必须真的调用了那个工具。这条把 tags 从形容词变成
+            # **可验证的调用记录** —— 打了 `estimate-termwise` 的笔记,正文里
+            # 就得有 [[逐项估计]]。例外:工具笔记自己不必自链。
+            note = TOOLS.get(tag)
+            if note and note != stem and f"[[{note}" not in scan:
+                msgs.append(f"tags `{tag}` 无对应双链:正文里没有 [[{note}]]")
+
+        # 工具笔记必须在词表里注册,否则 slug 是私设的,别人打不出这个 tag
+        if t == "tool" and TOOLS and stem not in TOOLS.values():
+            msgs.append(f"type: tool 但未登记进 TOOLS 词表:{stem}")
 
         if ":" in os.path.basename(r):
             msgs.append("文件名含半角冒号(macOS Finder 会显示成斜杠)")
@@ -564,6 +617,11 @@ def doctor(only=None):
         # 抽象断裂点只作为**参考数字**打印,不计入问题数。MOC 写的是「一篇 1–3 处,
         # 不铺满」,但那是写作时的自我提醒,不是可以由脚本判定的硬约束 ——
         # 判断一处断裂点该不该在,只有写的人知道。
+        # 工具的失效边界。2025 的 55 篇里只有 2 篇写了独立的边界小节,
+        # 做成硬错等于 doctor 永远红着 —— 所以和「抽象断裂点」同级,只作参考。
+        if t == "tool" and not fm.get("boundary"):
+            notes_only.append(f"{r}:tool 未记录 boundary(失效边界)")
+
         if t in ("lecture", "vibelearn"):
             n = scan.count("抽象断裂点")
             if n == 0 or n > 3:
