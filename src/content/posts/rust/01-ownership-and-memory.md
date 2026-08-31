@@ -7,6 +7,7 @@ categories: ['rust']
 series: 'rust'
 order: 1
 module: "基础语法与内存"
+layer: 'generated'
 draft: false
 ---
 

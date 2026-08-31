@@ -7,6 +7,7 @@ categories: ['rust']
 series: 'rust'
 order: 15
 module: "综合应用"
+layer: 'generated'
 draft: false
 ---
 

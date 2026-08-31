@@ -7,6 +7,7 @@ categories: ['rust']
 series: 'rust'
 order: 12
 module: "抽象与内存表示进阶"
+layer: 'generated'
 draft: false
 ---
 

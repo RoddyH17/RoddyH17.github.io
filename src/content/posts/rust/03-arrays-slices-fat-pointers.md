@@ -7,6 +7,7 @@ categories: ['rust']
 series: 'rust'
 order: 3
 module: "复合数据与编码"
+layer: 'generated'
 draft: false
 ---
 

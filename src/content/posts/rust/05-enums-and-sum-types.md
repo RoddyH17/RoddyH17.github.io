@@ -7,6 +7,7 @@ categories: ['rust']
 series: 'rust'
 order: 5
 module: "代数数据类型"
+layer: 'generated'
 draft: false
 ---
 
