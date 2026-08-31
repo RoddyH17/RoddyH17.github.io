@@ -7,6 +7,7 @@ categories: ['rust']
 series: 'rust'
 order: 7
 module: "标准库与工程组织"
+layer: 'generated'
 draft: false
 ---
 
