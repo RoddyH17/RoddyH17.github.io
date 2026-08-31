@@ -1,76 +1,180 @@
 ---
-// Archive: every post, grouped by subject rather than by year.
+// Archive is a knowledge filesystem, not a date drawer.
 //
-// Why not chronological: the old version grouped by year and hung an MM-DD on
-// each row, which answered a question nobody was asking. What is actually being
-// archived here is a curriculum — the Rust log is a sequence where Day 1 leads
-// to Day 8 — and a sequence wants reading order, not filing order. Dates carry
-// no meaning for a reader landing on this page, so they are not shown anywhere.
-//
-// Two ordering rules, both stated once and applied everywhere:
-//   groups — largest first, ties alphabetical. The main body of work leads.
-//   inside — by series number when the title carries one ("Day 7.5 · …"),
-//            otherwise oldest first.
-//
-// The series number, not the date, is what orders a curriculum: Day 5.5 was
-// written after Day 6 but belongs between 5 and 6, and sorting by pubDate puts
-// it in the wrong place. Numbered posts lead the group; anything unnumbered
-// follows in the order it was written.
+// The public hierarchy mirrors the learning system:
+//   subject → curriculum module → concept rung → generated / the real versions.
+// Legacy posts without a curriculum coordinate remain readable in a flat stream.
+// type / field / tags stay private to the Vault; layer is public because readers
+// need it to understand why two documents about the same concept coexist.
 import SiteSeo from '~/components/SiteSeo.astro'
 import LayoutDefault from '~/layouts/LayoutDefault.astro'
 import type { Post } from '~/types'
 import { getCategories, getPosts } from '~/utils'
 
-/** "Day 7.5 · Option and Result" → 7.5. Anything else → null. */
-const SERIES_RE = /^\p{L}+\s+(\d+(?:\.\d+)?)\s*[·:]/u
+type LearningLayer = 'generated' | 'the real'
+
+interface ArchiveEntry {
+  title: string
+  href: string
+  order: number
+  label: string | null
+  module?: string
+  concept?: string
+  layer?: LearningLayer
+  revision?: number
+}
+
+interface ConceptGroup {
+  order: number
+  label: string
+  title: string
+  entries: ArchiveEntry[]
+}
+
+const LEGACY_SERIES_RE = /^\p{L}+\s+(\d+(?:\.\d+)?)\s*[·:]/u
+const RUNG_RE = /^(\d+)\s*·\s*/
 
 const SUBJECT_META: Record<string, string> = {
-  rust: 'Sequential curriculum',
+  rust: 'A sequential curriculum with lived-learning revisions',
   crypto: 'Independent stream',
 }
+
+const MODULE_ORDER = [
+  '基础语法与内存',
+  '复合数据与编码',
+  '代数数据类型',
+  '标准库与工程组织',
+  '抽象与内存表示进阶',
+  '综合应用',
+]
 
 const categoryMap = await getCategories()
 const total = (await getPosts(true)).length
 
 const groups = Array.from(categoryMap)
-  .map(([name, posts]) => ({
-    name,
-    id: name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-    description: SUBJECT_META[name.toLowerCase()] ?? 'Independent subject',
-    // getCategories() inherits the feed's newest-first order; a series reads forward.
-    posts: [...posts].reverse().map(toEntry).sort(bySeriesThenAge),
-  }))
-  .sort((a, b) => b.posts.length - a.posts.length || a.name.localeCompare(b.name))
+  .map(([name, posts]) => {
+    const entries = [...posts].reverse().map(toEntry).sort(byCurriculumThenLayer)
+    const numbered = entries.filter((entry) => !Number.isNaN(entry.order))
+    const unsequenced = entries.filter((entry) => Number.isNaN(entry.order))
 
-function toEntry(post: Post) {
+    return {
+      name,
+      id: name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+      description: SUBJECT_META[name.toLowerCase()] ?? 'Independent subject',
+      count: entries.length,
+      modules: groupModules(numbered),
+      unsequenced,
+    }
+  })
+  .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+
+function toEntry(post: Post): ArchiveEntry {
   const title = post.data.title
-  const match = SERIES_RE.exec(title)
-  const series = Number(match?.[1] ?? Number.NaN)
+
+  if (post.data.order !== undefined) {
+    return {
+      title: title.replace(RUNG_RE, '').trim(),
+      href: `/posts/${post.id}/`,
+      order: post.data.order,
+      label: String(post.data.order).padStart(2, '0'),
+      module: post.data.module,
+      concept: post.data.concept,
+      layer: post.data.layer,
+      revision: post.data.revision,
+    }
+  }
+
+  const match = LEGACY_SERIES_RE.exec(title)
+  const order = Number(match?.[1] ?? Number.NaN)
   return {
     title: match ? title.slice(match[0].length).trim() : title,
     href: `/posts/${post.id}/`,
-    series,
-    label: Number.isNaN(series) ? null : `Day ${series}`,
+    order,
+    label: Number.isNaN(order) ? null : `Day ${order}`,
   }
 }
 
-function bySeriesThenAge(a: { series: number }, b: { series: number }) {
-  if (Number.isNaN(a.series) && Number.isNaN(b.series)) return 0
-  if (Number.isNaN(a.series)) return 1
-  if (Number.isNaN(b.series)) return -1
-  return a.series - b.series
+function byCurriculumThenLayer(a: ArchiveEntry, b: ArchiveEntry) {
+  if (Number.isNaN(a.order) && Number.isNaN(b.order)) return 0
+  if (Number.isNaN(a.order)) return 1
+  if (Number.isNaN(b.order)) return -1
+  if (a.order !== b.order) return a.order - b.order
+
+  const layerRank = (entry: ArchiveEntry) => {
+    if (entry.layer === 'generated') return 0
+    if (entry.layer === 'the real') return 1
+    return 2
+  }
+  return layerRank(a) - layerRank(b) || (a.revision ?? 0) - (b.revision ?? 0)
+}
+
+function groupModules(entries: ArchiveEntry[]) {
+  const modules = new Map<string, ArchiveEntry[]>()
+  for (const entry of entries) {
+    const name = entry.module ?? 'Learning sequence'
+    const bucket = modules.get(name) ?? []
+    bucket.push(entry)
+    modules.set(name, bucket)
+  }
+
+  return Array.from(modules, ([name, moduleEntries]) => ({
+    name,
+    concepts: groupConcepts(moduleEntries),
+    firstOrder: Math.min(...moduleEntries.map((entry) => entry.order)),
+    lastOrder: Math.max(...moduleEntries.map((entry) => entry.order)),
+  })).sort((a, b) => {
+    const ai = MODULE_ORDER.indexOf(a.name)
+    const bi = MODULE_ORDER.indexOf(b.name)
+    if (ai !== -1 || bi !== -1) {
+      if (ai === -1) return 1
+      if (bi === -1) return -1
+      return ai - bi
+    }
+    return a.firstOrder - b.firstOrder
+  })
+}
+
+function groupConcepts(entries: ArchiveEntry[]): ConceptGroup[] {
+  const concepts = new Map<number, ArchiveEntry[]>()
+  for (const entry of entries) {
+    const bucket = concepts.get(entry.order) ?? []
+    bucket.push(entry)
+    concepts.set(entry.order, bucket)
+  }
+
+  return Array.from(concepts, ([order, conceptEntries]) => {
+    conceptEntries.sort(byCurriculumThenLayer)
+    const generated = conceptEntries.find((entry) => entry.layer === 'generated')
+    const named = conceptEntries.find((entry) => entry.concept)
+    return {
+      order,
+      label: String(order).padStart(2, '0'),
+      title: named?.concept ?? generated?.title ?? conceptEntries[0].title,
+      entries: conceptEntries,
+    }
+  }).sort((a, b) => a.order - b.order)
+}
+
+function layerLabel(entry: ArchiveEntry) {
+  if (entry.layer === 'generated') return 'generated'
+  if (entry.layer === 'the real') return `the real${entry.revision ? ` · v${entry.revision}` : ''}`
+  return 'note'
 }
 ---
 
 <LayoutDefault page="archive">
-  <SiteSeo slot="seo" title="Archive" desc="Every post, grouped by subject and listed in reading order." />
+  <SiteSeo
+    slot="seo"
+    title="Archive"
+    desc="A knowledge archive organised by subject, curriculum, concept, and lived-learning layer."
+  />
 
-  <section class="prose">
+  <section class="prose archive-shell">
     <h2 class="archive-title post-title">Archive</h2>
 
     <p class="lead">
-      Everything written here, grouped by what it is about and listed in reading order. The Rust log is a sequence — it
-      runs from the top down, not newest first.
+      This is a knowledge filesystem, not a timeline. A concept can begin as a <code>generated</code> learning scaffold and
+      later gain a <code>the real</code> record shaped by code, errors, questions, and verification.
     </p>
 
     <p class="op-55 text-3.5">
@@ -84,11 +188,11 @@ function bySeriesThenAge(a: { series: number }, b: { series: number }) {
       <p>Subject index</p>
       <ul>
         {
-          groups.map(({ id, name, description, posts }) => (
+          groups.map(({ id, name, description, count }) => (
             <li>
               <a href={`#${id}`}># {name}</a>
               <span>
-                {description} ({posts.length})
+                {description} ({count})
               </span>
             </li>
           ))
@@ -97,23 +201,63 @@ function bySeriesThenAge(a: { series: number }, b: { series: number }) {
     </nav>
 
     {
-      groups.map(({ id, name, description, posts }) => (
+      groups.map(({ id, name, description, count, modules, unsequenced }) => (
         <section id={id} class="subject-section">
           <header class="subject-heading">
             <h3 class="post-title"># {name}</h3>
             <p>
-              {description} ({posts.length})
+              {description} ({count})
             </p>
           </header>
-          <ul class="entries">
-            {posts.map(({ title, href, label }) => (
-              <li class:list={{ unsequenced: !label }}>
-                <span class="timeline-marker i-mdi-circle-outline" aria-hidden="true" />
-                {label && <span class="entry-label">{label}</span>}
-                <a href={href}>{title}</a>
-              </li>
-            ))}
-          </ul>
+
+          {modules.map((module) => (
+            <section class="module-section" aria-labelledby={`${id}-${module.firstOrder}`}>
+              <header class="module-heading">
+                <p class="module-kicker">
+                  {String(module.firstOrder).padStart(2, '0')}–{String(module.lastOrder).padStart(2, '0')}
+                </p>
+                <h4 id={`${id}-${module.firstOrder}`}>{module.name}</h4>
+              </header>
+
+              <ol class="concept-list">
+                {module.concepts.map((concept) => (
+                  <li class="concept-node">
+                    <div class="concept-heading">
+                      <span class="concept-order">{concept.label}</span>
+                      <strong>{concept.title}</strong>
+                    </div>
+                    <ul class="layer-list">
+                      {concept.entries.map((entry) => (
+                        <li>
+                          <span class:list={['layer-badge', entry.layer === 'the real' && 'is-real']}>
+                            {layerLabel(entry)}
+                          </span>
+                          <a href={entry.href}>{entry.title}</a>
+                        </li>
+                      ))}
+                    </ul>
+                  </li>
+                ))}
+              </ol>
+            </section>
+          ))}
+
+          {unsequenced.length > 0 && (
+            <section class="module-section loose-section">
+              <header class="module-heading">
+                <p class="module-kicker">stream</p>
+                <h4>Independent notes</h4>
+              </header>
+              <ul class="loose-list">
+                {unsequenced.map((entry) => (
+                  <li>
+                    <span class="timeline-marker i-mdi-circle-outline" aria-hidden="true" />
+                    <a href={entry.href}>{entry.title}</a>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
         </section>
       ))
     }
@@ -121,7 +265,13 @@ function bySeriesThenAge(a: { series: number }, b: { series: number }) {
 </LayoutDefault>
 
 <style>
+  .archive-shell {
+    --archive-line: color-mix(in srgb, currentColor 14%, transparent);
+    --archive-muted: color-mix(in srgb, currentColor 58%, transparent);
+  }
+
   .lead {
+    max-width: 68ch;
     font-size: 1.15rem;
     line-height: 1.65;
   }
@@ -139,11 +289,12 @@ function bySeriesThenAge(a: { series: number }, b: { series: number }) {
   .subject-index {
     margin-top: 1.25rem;
     padding: 0.75rem 0 0.85rem;
-    border-top: 1px solid color-mix(in srgb, currentColor 13%, transparent);
-    border-bottom: 1px solid color-mix(in srgb, currentColor 13%, transparent);
+    border-top: 1px solid var(--archive-line);
+    border-bottom: 1px solid var(--archive-line);
   }
 
-  .subject-index > p {
+  .subject-index > p,
+  .module-kicker {
     margin: 0 0 0.65rem;
     font-size: 0.68rem;
     letter-spacing: 0.18em;
@@ -180,14 +331,13 @@ function bySeriesThenAge(a: { series: number }, b: { series: number }) {
   }
 
   .subject-section {
-    max-width: none;
-    margin-top: 1rem;
+    margin-top: 2rem;
     scroll-margin-top: 2rem;
   }
 
   .subject-section + .subject-section {
     padding-top: 1.65rem;
-    border-top: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+    border-top: 1px solid var(--archive-line);
   }
 
   .subject-heading {
@@ -197,7 +347,9 @@ function bySeriesThenAge(a: { series: number }, b: { series: number }) {
   }
 
   .subject-heading h3,
-  .subject-heading p {
+  .subject-heading p,
+  .module-heading h4,
+  .module-heading p {
     margin: 0;
   }
 
@@ -205,51 +357,110 @@ function bySeriesThenAge(a: { series: number }, b: { series: number }) {
     font-size: 1.4rem;
   }
 
-  /* A single guide and hairline rows turn the Rust posts into a reading path
-     without wrapping every entry in a separate card. */
-  .entries {
-    position: relative;
+  .module-section {
+    margin-top: 1.6rem;
+  }
+
+  .module-heading {
+    display: grid;
+    grid-template-columns: 4.25rem minmax(0, 1fr);
+    align-items: baseline;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--archive-line);
+  }
+
+  .module-heading h4 {
+    font-size: 1rem;
+    font-weight: 600;
+  }
+
+  .concept-list,
+  .layer-list,
+  .loose-list {
     list-style: none;
-    margin: 0.85rem 0 0 0.45rem;
-    padding: 0 0 0 1.35rem;
+    margin: 0;
+    padding: 0;
+  }
+
+  .concept-node {
+    display: grid;
+    grid-template-columns: minmax(12rem, 0.72fr) minmax(16rem, 1.28fr);
+    gap: 1.25rem;
+    margin: 0;
+    padding: 0.72rem 0;
+    border-bottom: 1px solid var(--archive-line);
+  }
+
+  .concept-heading {
+    display: grid;
+    grid-template-columns: 2.5rem minmax(0, 1fr);
+    gap: 0.75rem;
+    align-items: baseline;
+  }
+
+  .concept-heading strong {
+    font-size: 0.95rem;
+    font-weight: 550;
+  }
+
+  .concept-order {
+    font-variant-numeric: tabular-nums;
+    opacity: 0.68;
+  }
+
+  .layer-list {
+    display: grid;
+    gap: 0.38rem;
+  }
+
+  .layer-list li {
+    display: grid;
+    grid-template-columns: 7.6rem minmax(0, 1fr);
+    align-items: baseline;
+    gap: 0.85rem;
+    margin: 0;
+  }
+
+  .layer-badge {
+    width: fit-content;
+    padding: 0.08rem 0.42rem;
+    border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+    border-radius: 999px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.66rem;
+    letter-spacing: 0.04em;
+    line-height: 1.5;
+    opacity: 0.64;
+  }
+
+  .layer-badge.is-real {
+    border-color: color-mix(in srgb, currentColor 48%, transparent);
+    opacity: 0.95;
+  }
+
+  .loose-list {
+    margin-left: 0.45rem;
+    padding-left: 1.35rem;
     border-left: 1px solid color-mix(in srgb, currentColor 42%, transparent);
   }
 
-  .entries li {
+  .loose-list li {
     position: relative;
-    display: grid;
-    grid-template-columns: 6.2rem minmax(0, 1fr);
-    align-items: baseline;
-    column-gap: 1rem;
     margin: 0;
-    padding: 0.15rem 0 0.15rem 0.15rem;
-    border-bottom: 1px solid color-mix(in srgb, currentColor 12%, transparent);
-  }
-
-  .entries li:last-child {
-    border-bottom: none;
-  }
-
-  .entries li.unsequenced {
-    grid-template-columns: minmax(0, 1fr);
+    padding: 0.28rem 0;
+    border-bottom: 1px solid var(--archive-line);
   }
 
   .timeline-marker {
     position: absolute;
-    top: 0.39rem;
+    top: 0.55rem;
     left: -1.75rem;
     width: 0.8rem;
     height: 0.8rem;
     color: currentColor;
   }
 
-  .entry-label {
-    font-size: 0.82rem;
-    white-space: nowrap;
-    opacity: 0.78;
-  }
-
-  @media (max-width: 640px) {
+  @media (max-width: 720px) {
     .subject-index ul,
     .subject-index li,
     .subject-heading {
@@ -265,9 +476,23 @@ function bySeriesThenAge(a: { series: number }, b: { series: number }) {
       display: none;
     }
 
-    .entries li {
+    .module-heading,
+    .concept-node {
       grid-template-columns: 1fr;
-      gap: 0.2rem;
+      gap: 0.45rem;
+    }
+
+    .module-kicker {
+      margin-bottom: 0;
+    }
+
+    .layer-list {
+      padding-left: 3.25rem;
+    }
+
+    .layer-list li {
+      grid-template-columns: 1fr;
+      gap: 0.15rem;
     }
   }
 </style>

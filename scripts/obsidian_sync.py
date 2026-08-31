@@ -37,10 +37,11 @@ SKIP_DIRS = {".obsidian", ".smart-env", "_templates", "_to_delete"}
 
 
 # ============================================================== 地形模型
-# vault 的 frontmatter 不是分类表,是**地形图**。三个字段回答三个不同的问题
+# vault 的 frontmatter 不是分类表,是**地形图**。四个字段回答四个不同的问题
 # (见 vault 的 `00 2026 Fall MOC.md` §地形元数据):
 #
 #   type  — 这份知识**怎样产生**?          进入森林的方式
+#   layer — 它是生成脚手架还是亲历坐标?    知识与身体经验的相对位置
 #   field — 它处在**哪些知识场域**?        森林、山谷与林间空地
 #   tags  — 从这里**往哪走**最降低困惑?    局部可走的羊肠小径
 #
@@ -60,6 +61,7 @@ NOTE_TYPES = {
 }
 # moc 是导航基础设施,不伪装成学习产物。
 INFRA_TYPES = {"moc"}
+LEARNING_LAYERS = {"generated", "the real"}
 
 # `course` 已被 vault 明确废除:「frontmatter 不再用 course 把跨课程知识锁回
 # 行政边界」。课程归属由**目录与 MOC** 保存,不由 frontmatter 保存。
@@ -144,7 +146,7 @@ TOOLS = {
 }
 
 # frontmatter 里的标量键与列表键。顺序即 Notion callout 里的呈现顺序。
-SCALAR_META = ("type", "lecture", "created", "horizon", "origin")
+SCALAR_META = ("type", "layer", "lecture", "created", "horizon", "origin")
 LIST_META = ("field", "tags", "websites")
 
 # Holzwege / Questioning 保存的是**尚未证实**的跨场域候选路径。vault 的规范写得
@@ -206,17 +208,49 @@ def rel(path):
     return os.path.relpath(path, VAULT).replace(os.sep, "/")
 
 
-def ladder_of(path):
-    """从所属目录 + 文件名前缀取阶梯位置。不在任何已注册阶梯里就返回 None。"""
+def _ladder_registration(path):
+    """返回命中的阶梯根、配置和根目录内的相对路径。
+
+    阶梯允许把一个概念升级成文件夹。例如 Trait 同时保存学习前的
+    `11 trait 语法.md` 与学习后的 `Traits_v1.md`。旧版只接受 Concepts 的
+    直接子文件,一旦进入子目录就会静默丢失阶梯坐标。
+    """
     r = rel(path)
-    d = os.path.dirname(r)
-    lad = LADDERS.get(d)
-    if not lad:
+    for root in sorted(LADDERS, key=len, reverse=True):
+        if r == root or r.startswith(root + "/"):
+            return root, LADDERS[root], r[len(root):].lstrip("/")
+    return None
+
+
+def _rung_number(path, inside):
+    """先读当前文件前缀;版本文件无前缀时,继承同目录 generated 原稿编号。"""
+    m = re.match(r"(\d{2}) ", os.path.basename(inside))
+    if m:
+        return int(m.group(1))
+
+    siblings = []
+    try:
+        for name in os.listdir(os.path.dirname(path)):
+            match = re.match(r"(\d{2}) .+\.md$", name)
+            if match:
+                siblings.append(int(match.group(1)))
+    except OSError:
         return None
-    m = re.match(r"(\d{2}) ", os.path.basename(r))
-    if not m:
+    unique = sorted(set(siblings))
+    return unique[0] if len(unique) == 1 else None
+
+
+def ladder_of(path):
+    """从阶梯根、概念目录与编号原稿得到公开阅读坐标。"""
+    registration = _ladder_registration(path)
+    if not registration:
         return None
-    n = int(m.group(1))
+    _root, lad, inside = registration
+    n = _rung_number(path, inside)
+    if n is None or n not in lad["slugs"]:
+        return None
+    parts = inside.split("/")
+    concept = parts[0] if len(parts) > 1 else None
     for zh, en, (lo, hi) in lad["modules"]:
         if lo <= n <= hi:
             return {
@@ -226,6 +260,7 @@ def ladder_of(path):
                 "module_en": en,
                 "series": lad["series"],
                 "category": lad["category"],
+                "concept": concept,
             }
     return None
 
@@ -324,7 +359,8 @@ def parse_frontmatter(head):
 
 
 def parse(path):
-    raw = open(path, encoding="utf-8").read()
+    with open(path, encoding="utf-8") as handle:
+        raw = handle.read()
     fm, body = {}, raw
     if raw.startswith("---\n"):
         head, _, rest = raw[4:].partition("\n---\n")
@@ -571,16 +607,21 @@ def to_post(path, category=None, draft=True):
         f"categories: ['{category or (lad or {}).get('category', 'notes')}']",
     ]
     if lad:
-        # 阶梯坐标。站上已经没有页面消费它了(/rust 索引页已撤),留着是为了
-        # 让文件本身仍然带着难度序号,跟 Obsidian / Notion 对得上。
-        #
-        # 注意这里**只写阶梯坐标,不写 type / field / tags** —— 地形元数据是
-        # vault 的内部导航词汇,不对外公开(用户 2026-08-28 决定)。
+        # Archive 消费这些公开投影坐标。type / field / tags 仍然只属于 vault;
+        # layer 例外,因为 Archive 必须区分学习前脚手架与亲历后坐标。
         out += [
             f"series: '{lad['series']}'",
             f"order: {lad['order']}",
             f"module: \"{lad['module']}\"",
         ]
+        if lad.get("concept"):
+            out.append(f"concept: \"{lad['concept'].replace(chr(34), chr(39))}\"")
+    layer = fm.get("layer")
+    if layer in LEARNING_LAYERS:
+        out.append(f"layer: '{layer}'")
+    version = re.search(r"_v(\d+)$", os.path.splitext(os.path.basename(path))[0], re.I)
+    if version:
+        out.append(f"revision: {int(version.group(1))}")
     out += [
         f"draft: {'true' if draft else 'false'}",
         "---",
@@ -593,7 +634,17 @@ def to_post(path, category=None, draft=True):
 
 def post_slug(path):
     lad = ladder_of(path)
-    return lad["slug"] if lad else None
+    if not lad:
+        return None
+    fm, _body, _hash = parse(path)
+    if fm.get("layer") != "the real":
+        return lad["slug"]
+    stem = os.path.splitext(os.path.basename(path))[0].lower()
+    suffix = re.sub(r"[^a-z0-9]+", "-", stem).strip("-")
+    version = re.search(r"_v(\d+)$", stem, re.I)
+    if not suffix:
+        suffix = f"v{version.group(1)}" if version else "the-real"
+    return f"{lad['slug']}/{suffix}"
 
 
 # ================================================================ doctor
@@ -627,6 +678,10 @@ def doctor(only=None):
                 f"type 不在枚举内:{t}"
                 "(应为 lecture / vibelearn / knot / tool / uber / moc)"
             )
+
+        layer = fm.get("layer")
+        if layer and layer not in LEARNING_LAYERS:
+            msgs.append(f"layer 不在枚举内:{layer}(应为 generated / the real)")
 
         for k in RETIRED_KEYS:
             if k in fm:
@@ -769,23 +824,38 @@ def main():
             for p in notes():
                 l = ladder_of(p)
                 if l and rel(p).startswith(d + "/"):
-                    print(f"{l['order']:02d}\t{l['module']}\t{l['slug']}\t{os.path.basename(p)[:-3]}")
+                    print(
+                        f"{l['order']:02d}\t{l['module']}\t{post_slug(p)}\t"
+                        f"{os.path.basename(p)[:-3]}"
+                    )
     elif cmd == "build-posts":
-        dest_arg = sys.argv[2] if len(sys.argv) > 2 else None
+        publish = "--publish" in sys.argv[2:]
+        positional = [arg for arg in sys.argv[2:] if not arg.startswith("--")]
+        dest_arg = positional[0] if positional else None
         n = 0
+        outputs = {}
         for p in notes():
             lad = ladder_of(p)
             if not lad or publish_denied(p):
                 continue
             dest = dest_arg or os.path.join("src/content/posts", lad["series"])
-            os.makedirs(dest, exist_ok=True)
-            open(os.path.join(dest, lad["slug"] + ".md"), "w", encoding="utf-8").write(to_post(p))
+            slug = post_slug(p)
+            target = os.path.join(dest, slug + ".md")
+            if target in outputs:
+                raise SystemExit(
+                    f"输出冲突:{rel(p)} 与 {outputs[target]} 都映射到 {target}"
+                )
+            outputs[target] = rel(p)
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            with open(target, "w", encoding="utf-8") as handle:
+                handle.write(to_post(p, draft=not publish))
             n += 1
-        print(f"✓ 已生成 {n} 篇阶梯文章")
+        state = "发布" if publish else "草稿"
+        print(f"✓ 已生成 {n} 篇阶梯文章({state})")
     else:
         raise SystemExit(
             "用法: list | changed | doctor [--only PREFIX] | commit | notion <path> | post <path> [category] "
-            "| ladder | build-posts [dest]"
+            "| ladder | build-posts [dest] [--publish]"
         )
 
 
