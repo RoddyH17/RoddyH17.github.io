@@ -34,3 +34,5 @@ src/data/activity.json
 
 # Python
 __pycache__/
+
+.tmp_stage/

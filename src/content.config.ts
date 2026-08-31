@@ -26,6 +26,20 @@ const posts = defineCollection({
       source: z.optional(z.object({ url: z.string(), title: z.string() })),
       enclosure: z.optional(z.object({ url: z.string(), length: z.number(), type: z.string() })),
       pin: z.boolean().default(false).optional(),
+      // 难度阶梯坐标。posts 集合本身是时间流(按 pubDate 排),这三个字段让一组
+      // 文章可以被 /archive 按**难度**重排 —— 一份内容两种秩序,不必复制。
+      // 三个平台(Obsidian 文件名前缀 / Notion 页标题 / 这里)共用同一套编号。
+      //   series — 属于哪条阶梯,目前只有 'rust'
+      //   order  — 阶梯位置 0..16,决定顺序
+      //   module — 难度板块名,决定分组
+      series: z.string().optional(),
+      order: z.number().int().min(0).optional(),
+      module: z.string().optional(),
+      // 学习回收坐标。type / field / tags 仍属于 Vault 内部地形；Archive 只消费
+      // 这三个公开投影字段，把同一概念的生成脚手架与亲历版本放回一棵树里。
+      concept: z.string().optional(),
+      layer: z.enum(['generated', 'the real']).optional(),
+      revision: z.number().int().min(1).optional(),
     }),
 })
 

@@ -373,7 +373,255 @@ collection://1d35432c-88e6-80f2-9c31-000bb9d9e9f0
    生成 NOTES 与博客 → 更新记忆
 5. L4 再利用钩子:改 `src/content.config.ts` 加 `concepts` / `hook` / `analogies`,回填 Day 1–4
 6. 第 2 章开始前,定 `rust_learn` 的跨章目录约定(见 §3 契约第 4 条)
+7. ~~接入 Obsidian 概念层~~ —— ✅ 2026-08-25,见 §10
 
 ---
 
-_最后更新:2026-08-07_
+## 10. L5 · Obsidian 概念层(2026-08-25 接入,原型)
+
+### 为什么加这一层
+
+L1–L4 的切分轴是**天**。到今天 vault 里已经有 17 篇按**概念**组织的 Rust 笔记
+(`Concepts/00`–`16`,从简到难),这正是 §2 结尾预言的那个代价的解法:
+
+> 到第 60 天,「借用规则怎么写来着」会变成「那是第几天学的来着」。等日页多到查不动时,
+> 解法是在父页维护一份**主题索引**(概念 → 哪一天)。
+
+Obsidian 就是那份主题索引,而且它比预想的更重:它不只索引,还承载了「抽象断裂点」
+与每篇 3–5 个开放问题——这些东西按天切会被打散。
+
+**两条轴并存,不互相替代**:`dayN/` 是时间流(发生了什么),`Concepts/NN` 是概念阶梯
+(这门语言由什么构成)。同一份知识的两次组织。
+
+### 方向
+
+```
+Obsidian vault (概念,权威)
+      ├─ obsidian.sh notion <path> ──→ Notion(归档/手机可读)   ✅ 已验证
+      └─ obsidian.sh post   <path> ──→ blog src/content/posts   ✅ 已验证
+```
+
+Obsidian 在这一层是**源头**,和 §2 里 `main.rs` 是 day 层的源头同构。
+
+### 脚本
+
+| 脚本                       | 职责                                                                        |
+| -------------------------- | --------------------------------------------------------------------------- |
+| `scripts/obsidian.sh`      | `list` / `changed` / `commit`(发现) · `notion` / `post`(转换)               |
+| `scripts/obsidian_sync.py` | 实现:vault 遍历、manifest 增量、Obsidian → Notion / 博客 方言转换。仅标准库 |
+
+`changed` / `commit` 分开,是同一条原则:**「哪些笔记变了」是确定性的,交给脚本;
+「这条值不值得发、标题怎么写」需要判断,由 Claude 做。** manifest 落在
+`.cache/obsidian-manifest.json`(已 gitignore)。
+
+### 2026-08-25 端到端实测结论
+
+**① Notion 备份 —— 可行,保真度高。**
+
+实测把 `Concepts/12 Box 与 DST.md` 推成 Notion 子页再读回,以下全部无损:
+多级标题、Rust 代码块、表格、引用块、加粗、行内代码、`✓/✗/⚠️` 与 emoji。
+
+但 Obsidian 与 Notion 的 markdown 方言**不兼容**,必须转换,四条硬差异:
+
+<!-- 这四条是踩出来的,不要凭印象改 -->
+
+1. **表格**:Notion 不认管道表,必须转成 `<table><tr><td>` XML。
+2. **多行引用**:Notion 里每个 `>` 行是**一个独立引用块**;要一整块必须折成一行用 `<br>` 连接。
+   「抽象断裂点」全是多行引用,不转就会碎成三四块。
+3. **转义**:`< > { } | ^` 在正文里要转义,但**行首的 `>` 是引用标记不能转**,
+   代码块和行内代码里也不能转。脚本里的顺序(建表 → 护代码 → 护 XML → 转义 → 折引用)
+   是唯一正确的顺序,颠倒任何一步都会坏。
+4. **行内数学**:Obsidian 是 `$x$`,Notion 是 ``$`x`$``。
+5. **wikilink**:Notion 没有对应物,`[[A|B]]` 目前降级成 `**B**`。
+   要变成真链接,得先维护一张「笔记 → Notion page URL」的映射表。
+
+**写入仍然只能走 MCP** —— `.env` 里的 integration 是只读的(§3)。
+
+**② 博客同步 —— 可行,但原来一条路都没有。**
+
+改动前:`new_post.sh` 只造一个空 `draft: true` 骨架,`sync.sh` 只 `git add && push`。
+**两边都不认识 Obsidian**(`grep -ri obsidian ~/blog` 命中 0 条),
+所谓「同步」全靠人手工复制。
+
+现在 `obsidian.sh post` 直接产出合规文章。实测:两篇由 vault 生成的文章通过
+`astro build`,33 页构建成功,表格 / 代码高亮 / 引用块 / 加粗全部正确渲染,正文无内容丢失。
+
+一条重要的实现决定:**输出 `.md` 而不是 `.mdx`**。`posts` 集合的 glob 是
+`**/*.{md,mdx}`,两者都收;但 MDX 会把 `<` 和 `{` 当 JSX 解析,而 Rust 笔记里
+`Vec<T>`、`Box<dyn Trait>`、`{color}` 遍地都是,用 .mdx 会直接编译失败。
+
+`description` 取的是**紧跟标题的定位句**,不是第一条引用 —— 第一条引用往往是
+文中的「抽象断裂点」,拿它当摘要会驴唇不对马嘴。
+
+### 2026-08-28 地形模型对齐
+
+vault 在 08-26 到 08-28 之间换了元数据模型,转换层这一轮是**追平它**,不是新增功能。
+权威源永远是 vault 的 `00 2026 Fall MOC.md`,这里只记下游为此改了什么。
+
+**vault 侧变了什么**
+
+1. **`type / layer / field / tags` 是地形,不是分类。** 四个字段回答四个不同的问题:
+   `type` = 这份知识**怎样产生**(进入森林的方式);`layer` = 它是学习前的生成脚手架,
+   还是经实际编码、报错、追问与验证后形成的 `the real`;`field` = 它长在**哪些场域**
+   (森林、山谷与林间空地);`tags` = 从这里**往哪走**(局部可走的羊肠小径)。
+   所以 `field` 是名词性层级路径,`tags` 是「动作—对象」(`trace-` / `map-` /
+   `separate-` / `construct-` / `locate-`)。
+2. **`course` 被废除。** 原话:「frontmatter 不再用 course 把跨课程知识锁回行政边界」。
+   课程归属由**目录与 MOC** 保存。
+3. **学习产物只有三种生成方式**:`lecture` / `vibelearn` / `knot`。`moc` 是导航
+   基础设施,不伪装成学习产物。
+4. **「不自动生成开放问题」是一条生成规则,不是删除指令。** MOC 的原话约束的是
+   **AI 往后怎么写新笔记**:用户原生问题放回触发点,AI 主动提出的跨课候选路径只进
+   Holzwege 工作台。已有的、用户认可的文末开放问题**是正当结构,不动**。
+   (2026-08-28 一度把这条读成了废除,并据此把 23 篇报成「遗留」—— 误判,已撤。)
+5. **新增 `Holzwege/` 与 `Questioning/`** —— 一根全新的**认识论状态**轴。保存的是
+   尚未证实、可能走不通的跨场域候选路径。`[x]` 是继续追踪的授权,`[ ]` **不等于拒绝**
+   只是休眠,失败的路径保留为地形证据。
+
+**下游因此改了什么**
+
+| 改动                           | 为什么                                                                                                                                                       |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `parse()` 换成 list-aware      | 旧的行式解析(`if ":" in line`)遇到 YAML 块列表会把 `field`/`tags` 解析成空串 —— 新模型信息量最大的两个字段**一条都没进过管道**                               |
+| Notion callout 重建            | 旧版无条件写一行 `tags: `,而 tags 恒为空,于是每页备份顶上挂着一行空标签。现在输出 `type/lecture/created/horizon/origin` + `field/tags/websites`,空字段不出行 |
+| 删除 `course` 的全部读取点     | `to_notion` 的 meta 与 `to_post` 的 description 兜底都在读一个永远不存在的键                                                                                 |
+| `ladder_of` → `LADDERS` 注册表 | 旧版硬编码 `"Concepts" in path`,只有 Rust 能进管道。现在按 vault 相对目录查表,别的课挂阶梯只需加一条配置                                                     |
+| 新增 `PUBLISH_DENY`            | Holzwege / Questioning 显式**拒绝上站**。发布是一次断言,把候选边发出去就是让假设冒充结论。旧版没出事纯粹因为 `ladder_of` 恰好返回 None —— 那是巧合不是设计   |
+| 裁尾注释重写                   | 把「不发」与「不该存在」分开:「开放问题」在 vault 里正当,裁掉纯粹是**发布侧取舍**(答案不在本篇,上站就成了答不上来的文章)                                     |
+| 新增 `obsidian.sh doctor`      | 按规范体检 frontmatter 与正文:type 枚举、field/tags 缺失、`course` 残留、开放问题残留、knot 缺 origin、断裂点数量(1–3)、双链解析                             |
+
+**上站只带地形的公开投影。** `type/field/tags` 仍是 vault 内部导航词汇,不公开；
+但 `layer/concept/revision` 要进入博客 frontmatter,因为 Archive 必须说明为什么同一概念
+同时存在学习前脚手架与亲历后的版本。公开坐标因此是 `series/order/module` +
+`concept/layer/revision`,正文仍不泄漏内部受控词表。
+
+**备份路径与上站路径的分界**:`PUBLISH_DENY` 只作用于 `post` / `build-posts`。
+`to_notion` 不拒绝也不裁尾 —— 备份不是断言,而且备份要全。
+
+**回归验证**:改动后对 17 篇 Rust Concepts 跑新旧 `to_post` 对拍,输出**逐字节相同**;
+`doctor` 扫全 vault 56 篇,**0 篇有问题**。vault 现行的设计与格式即目标状态,
+`doctor` 的职责是守住它,不是拿一套自造的标准去挑它。
+
+### 已知边界(Cowork 远程会话里测出来的)
+
+这两条只影响**在 Cowork 会话里代跑**,在 Roddy 自己的 Mac 上都不成立:
+
+- **桌面工作区 VM 没有外网**。`notion.sh` 任何联网命令、`git push` 都跑不了。
+  Notion 写入这次是走 MCP 完成的,不是走 `.env` 里那个 token。
+- **`node_modules` 是 macOS 装的**,里面只有 `@rollup/rollup-darwin-arm64`;
+  工作区 VM 是 Linux arm64,`npm run build` 会报 `Cannot find module
+@rollup/rollup-linux-arm64-gnu`。这次的构建验证是把源码搬到云端容器
+  重新 `npm install` 之后跑的。
+
+另外注意:`npm run activity` 在那个 VM 上跑会把 `activity.json` 里的 rust_learn
+提交数清空(它按 `~/rust_learn` 找,VM 上没有)。文件已 gitignore,本机再跑一次就正确,
+但不要在 VM 上跑完就 push。
+
+### 2026-08-25 · 三平台按难度对齐(已完成)
+
+原来三边共用的切分轴是**天**(§2)。现在 Rust 这一支换成**难度阶梯**:
+
+<!-- 日期轴并没有被删掉,只是不再是主视图。两条轴并存。 -->
+
+| 平台     | 编号在哪                                         | 角色                        |
+| -------- | ------------------------------------------------ | --------------------------- |
+| Obsidian | `Concepts/00`–`16` 文件名前缀 + H1               | **权威源头**,唯一手写的地方 |
+| Notion   | 页标题 `00 ·`–`16 ·`,System III 下按六个板块分组 | 归档中介                    |
+| 官网     | `/posts/rust/NN-<slug>`,归档走 `/archive`        | 对外叙事                    |
+
+**六个板块必须连续**(00–02 / 03–04 / 05–06 / 07–10 / 11–14 / 15–16)。
+阶梯的意义就在于顺着走,跳号的分组读起来是目录不是阶梯。分组表定义在
+`scripts/obsidian_sync.py` 的 `MODULES` / `SLUGS` —— **三个平台共用这一张表**。
+
+**Day 页没有改名。** 11 个 Day 页 ≠ 17 级台阶(Day3 分成 01+02,Day9 撑开成 12–16),
+所以对齐不可能靠改名完成 —— 必须另建一层。Day 页整体移到「原始学习日志 · Day1–Day9」
+子页下,**标题一个字没动** —— `notion.sh day <N>` 与 `audit` 的 join key 不断。
+
+**网站侧的三个改动**:
+
+1. `posts` 集合加三个可选字段 `series` / `order` / `module`(见 `src/content.config.ts`)。
+   posts 本身仍是时间流,这三个字段让同一批文章能被 `/rust` 按**难度**重排 ——
+   一份内容两种秩序,不必复制。
+2. ~~`src/pages/rust.astro` —— 仿 `/research` 的非时间流索引页~~ **已撤销,见下一节**。
+3. 旧的 10 篇 `day-*.mdx` 移到 `src/content/_archive-day-posts/`(在 posts 的 glob 范围外,
+   不再发布但仍在 git 里),`astro.config.ts` 里加了 10 条 redirect 把旧 URL 接到
+   它主要变成的那一级台阶 —— 不留 404。
+
+实测:云端容器重装依赖后 `astro build` 通过,41 页,17 级台阶单调递增,10 条重定向均生成。
+
+### 2026-08-26 · 撤掉 /rust 整合页,上站内容做尾部裁剪
+
+两处收窄。都是"站上要少一点"而不是"再加一层"。
+
+**一、撤掉 `/rust`。** 按难度分板块的索引页删了(`src/pages/rust.astro`),
+导航里的 Rust 入口和 `src/utils/index.ts` 里的 `getLadder()` 一并删。
+站上只留 `/posts`,归档就走本来就有的 `/archive`。
+
+难度阶梯这条轴**没有消失,只是退回 Obsidian 和 Notion**。文章 frontmatter 里的
+`series` / `order` / `module` 三个字段仍然照常写(`content.config.ts` 的 schema 也留着),
+只是现在站上没有页面消费它们 —— 留着是为了文件本身仍带着难度序号,跟另外两个平台对得上。
+哪天想把索引页加回来,数据是现成的。
+
+`astro.config.ts` 里那 10 条 day-* redirect **保留**。旧链接已经发出去过了,
+跟站上有没有索引页无关。
+
+**二、上站要裁尾。** `to_post()` 现在从第一个尾部小节的标题处截断
+(`cut_tail_sections()`,`TAIL_SECTIONS` = 开放问题 / 相关 / …)。理由:
+
+- 「开放问题」那 3–5 问是留着以后在别的学科里再撞见的,答案不在本篇。
+  放到站上就变成了一篇答不上来的文章。
+- 「相关」是指向 vault 内其他笔记的 wikilink,在站上根本解析不了。
+
+裁剪只发生在**上站**这条路径。`to_notion()` 不裁 —— Notion 是备份,备份要全。
+Obsidian 是源头,更不动。
+
+实现上要绕开围栏代码,否则代码块里一句 `## 相关` 的注释会把正文腰斩。
+正文中间的 `> **抽象断裂点｜…**` 引用块**不裁** —— 它们穿插在知识点里,是内容本身。
+
+### 转换器的已知局限(推 Notion 时要手改)
+
+这三条是推 17 篇时真撞到的,不是理论担忧:
+
+1. **引用块里的围栏代码**。`fold_quotes` 把多行引用折成一行 `<br>`,而代码围栏先被保护
+   成占位符,结果会得到一个嵌在引用行里的 fence —— Notion 渲染不了。
+   解法:把那段代码改成行内 `code`。
+2. **块级数学被转义**。`$$...$$` 里的花括号会被转义,KaTeX 直接坏掉;而且 Notion 要求
+   `$$` 单独成行。解法:手改。
+3. **嵌套加粗**。源文里 `**… [[X|Y]] …**` 这种写法,wikilink 降级成 `**Y**` 之后会变成
+   `**…**Y**…**`,两边都渲染得很怪。**这一条已在源文修掉**(04 / 06 两处),
+   以后写笔记时避免把双链包在加粗里。
+
+另外 `to_post` 的 description 提取踩过两次:取到了围栏的语言标记行;修了之后又把
+`**` 开头的段落当列表跳掉。现在只跳 `- ` / `* ` / `1. ` 和表格。
+
+### 2026-08-31 · generated / the real 进入 Archive
+
+完成 Trait 第一轮学习之后,单篇概念不再是终点。Vault 现在允许：
+
+```text
+Concepts/Trait/
+├── 11 trait 语法.md   # layer: generated
+└── Traits_v1.md       # layer: the real
+```
+
+同步器因此支持嵌套概念目录。无编号的 `Traits_v1` 从同目录唯一的编号原稿继承第 11 级，
+并发布到原稿的子路径：
+
+```text
+/posts/rust/11-trait-syntax/
+└── traits-v1/
+```
+
+Archive 的结构同步改成 `subject → module → concept → layer/version`。Knot / 非 Knot
+仍然是 `the real` 正文里的认知结构，不被压扁成网站 category；网站只公开足以恢复文件系统
+关系的 `concept/layer/revision`。
+
+### 下一步(这一层)
+
+1. wikilink → Notion page URL 映射,让备份页之间也能互相跳
+2. `post` 支持只导出「开放问题」做成短文,而不是整篇搬运
+3. 决定 Notion 那边的落点:是每篇概念一个子页,还是一个「Obsidian 备份」父页下的镜像树
+
+---
+
+_最后更新:2026-08-31(generated / the real 进入 Archive)_
